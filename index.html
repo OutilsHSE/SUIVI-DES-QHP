@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#003A6E">
+<title>Suivi des QHP — CDES</title>
+<link rel="stylesheet" href="css/qhp.css">
+</head>
+<body>
+<header><img id="logo" alt="CDES"><div class="ht"><h1>Suivi des QHP</h1><p>Quart d'Heure Prévention — CDES</p></div><button class="syncpill no-print" id="sync-pill" onclick="syncNow(true)" style="display:none">🔄 Synchroniser</button></header>
+<main>
+  <section class="view active" id="v-accueil">
+    <div id="acc-etat"></div>
+    <h2 class="acc-titre">Enregistrer un QHP</h2>
+    <button class="gros gros-scan no-print" onclick="document.getElementById('scan-in').click()"><span class="gi">📄</span><span class="gt"><b>Je scanne ma fiche</b><small>PDF ou photo de la fiche papier signée : l'IA remplit les champs, je vérifie et j'enregistre</small></span></button>
+    <input type="file" id="scan-in" accept="application/pdf,image/*" multiple style="display:none" onchange="scanFiche(this.files);this.value=''">
+    <button class="gros gros-saisie no-print" onclick="openFiche()"><span class="gi">✏️</span><span class="gt"><b>Je saisis mon QHP</b><small>Date, chantier, thème, participants : je remplis les champs moi-même</small></span></button>
+    <p class="acc-sec no-print"><a href="#" onclick="goEmarg();return false">✍️ Ou faire signer l'équipe directement sur le téléphone</a></p>
+  </section>
+
+  <section class="view" id="v-fiches">
+    <h2 class="acc-titre">Fiches QHP enregistrées</h2>
+    <div id="fiches-list"></div>
+  </section>
+
+  <section class="view" id="v-mensuel">
+    <div class="card no-print"><div class="row" style="align-items:flex-end"><div class="grow"><label class="f">Mois</label><input type="month" id="bilan-mois" onchange="renderMensuel()"></div><button class="btn btn-ghost btn-sm" onclick="setMoisCourant()">Ce mois</button></div></div>
+    <div id="mensuel-body"></div>
+  </section>
+
+  <section class="view" id="v-annuel">
+    <div class="card no-print"><div class="row" style="align-items:center;justify-content:space-between">
+      <div class="seg"><button id="tg-collab" class="on" onclick="setAnnuel('collab')">Collaborateurs</button><button id="tg-cond" onclick="setAnnuel('cond')">Conducteurs</button></div>
+      <div class="row" style="align-items:center;gap:6px"><button class="btn btn-ghost btn-sm" onclick="chgAnnee(-1)">◀</button><b id="an-annee" style="font-size:18px;color:var(--marine)"></b><button class="btn btn-ghost btn-sm" onclick="chgAnnee(1)">▶</button></div>
+    </div><div id="an-filtre" style="margin-top:10px"></div></div>
+    <div id="annuel-body"></div>
+  </section>
+
+  <section class="view" id="v-reglages">
+    <div class="card"><h2>👥 Collaborateurs</h2>
+      <p class="small muted">Ajoute, retire ou supprime une personne. « Départ » conserve l'historique et grise les mois suivants ; « Supprimer » efface la personne.</p>
+      <label class="f">Nom (Prénom NOM)</label><input type="text" id="new-name" placeholder="Ex. Jean DUPONT">
+      <div class="row">
+        <div class="grow"><label class="f">Groupe</label><select id="new-name-sec"></select></div>
+        <div class="grow" style="max-width:130px"><label class="f">Agence</label><select id="new-name-ag"></select></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:14px;margin-top:8px"><input type="checkbox" id="new-name-cond" style="width:auto"> Conducteur de travaux</label>
+      <button class="btn btn-primary btn-block" style="margin-top:8px" onclick="addName()">＋ Ajouter</button>
+      <label class="f" style="margin-top:14px">Filtrer la liste</label><select id="reg-filtre" onchange="renderReglages()"></select>
+      <div id="roster-edit" style="margin-top:10px"></div>
+    </div>
+    <div class="card"><h2>🏗️ Groupes & agences</h2>
+      <div class="row"><input type="text" id="new-sec" class="grow" placeholder="Nouveau groupe" onkeydown="if(event.key==='Enter')addSecteur()"><button class="btn btn-primary" onclick="addSecteur()">Ajouter</button></div>
+      <div id="sec-list" style="margin-top:10px"></div></div>
+    <div class="card"><h2>🎯 Objectifs & alertes</h2>
+      <label class="f">Cadence attendue — cas général</label>
+      <select id="cad-std" onchange="saveConf()"><option value="1">1 QHP par mois</option><option value="0.5">1 QHP tous les 2 mois</option><option value="0.34">1 QHP par trimestre</option></select>
+      <label class="f">Cadence attendue — Fonctions Support</label>
+      <select id="cad-sup" onchange="saveConf()"><option value="0.25">1 QHP tous les 4 mois</option><option value="0.34">1 QHP par trimestre</option><option value="0.5">1 QHP tous les 2 mois</option><option value="1">1 QHP par mois</option></select>
+      <label class="f">Participation minimale mensuelle (% de l'effectif)</label><input type="number" id="obj-part" min="0" max="100" value="80" onchange="saveConf()">
+      <p class="hint">Alerte individuelle proratisée à la date : ✅ ≥ 80 % de l'attendu · ⚠️ en dessous · 🚫 aucun QHP.</p></div>
+    <div class="card"><h2>🚧 Chantiers connus</h2><p class="small muted">Déduits des fiches. Retire un chantier terminé si besoin.</p><div id="ch-list" style="margin-top:6px"></div></div>
+    <div class="card"><h2>🔄 Synchronisation Google Sheets</h2>
+      <p class="small muted">Colle ici l'adresse du déploiement Apps Script. Tant que ces deux champs sont vides, l'appli fonctionne uniquement sur cet appareil et n'envoie rien nulle part.</p>
+      <label class="f">Adresse du webhook (…/exec)</label>
+      <input type="text" id="sy-url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
+      <label class="f">Mot de passe <span class="muted" style="font-weight:400">— fabriqué par le script, à coller une seule fois</span></label>
+      <input type="password" id="sy-secret" placeholder="donné par initialiser() dans le journal Apps Script" autocomplete="new-password">
+      <label class="f">Nom de cet appareil (pour le journal)</label>
+      <input type="text" id="sy-appareil" placeholder="Ex. PC bureau, téléphone chantier 1">
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:14px">
+        <input type="checkbox" id="sy-auto" style="width:auto"> Synchroniser automatiquement à chaque enregistrement</label>
+      <div class="row" style="margin-top:10px">
+        <button class="btn btn-ghost grow" onclick="testerWebhook()">🔌 Tester la connexion</button>
+        <button class="btn btn-primary grow" onclick="saveSync()">💾 Enregistrer</button></div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn btn-accent grow" onclick="syncNow(true)">🔄 Synchroniser maintenant</button>
+        <button class="btn btn-danger" onclick="oublierSync()">Oublier</button></div>
+      <p class="hint" id="sync-etat"></p>
+      <p class="hint">Le mot de passe est enregistré sur cet appareil uniquement. Sur un poste partagé, utilise « Oublier » en fin de journée.</p>
+      <div id="branchement-box" style="display:none;border-top:1px dashed var(--line);margin-top:12px;padding-top:10px">
+        <h3 style="margin-top:0">Brancher un autre appareil sans rien retaper</h3>
+        <p class="small muted">Ces liens contiennent déjà l'adresse et le mot de passe. La personne l'ouvre une fois : c'est branché.</p>
+        <div class="row">
+          <button class="btn btn-ghost grow" onclick="copierBranchement(false)">🔗 Lien pour un autre PC</button>
+          <button class="btn btn-primary grow" onclick="copierBranchement(true)">📱 Lien pour un conducteur</button></div>
+        <p class="hint">Le lien conducteur branche le téléphone <b>et</b> ouvre directement la fiche d'émargement. À envoyer par SMS ou Teams, pas sur un canal public.</p>
+      </div></div>
+    <div class="card"><h2>✍️ Fiche d'émargement en ligne</h2>
+      <p class="small muted">Le lien ci-dessous ouvre directement la fiche d'émargement signable au doigt. À mettre en favori sur les téléphones des conducteurs, ou à coller dans un mail / QR code.</p>
+      <div class="lienbox"><input type="text" id="lien-emarg" class="grow" readonly onclick="this.select()"><button class="btn btn-ghost btn-sm" onclick="copierLien()">📋 Copier</button></div>
+      <div class="row" style="margin-top:10px"><button class="btn btn-primary grow" onclick="goEmarg()">✍️ Ouvrir la fiche</button>
+        <button class="btn btn-ghost grow" onclick="document.getElementById('imp-fiche').click()">⬆ Importer une fiche signée</button>
+        
+        <input type="file" id="imp-fiche" accept=".json,application/json" style="display:none" onchange="importFiche(this)"></div>
+      <p class="hint">Une fiche signée sur un autre téléphone s'enregistre sur CET appareil-là : le conducteur touche « 📤 Envoyer au suivi » et tu importes le fichier ici. La synchronisation automatique arrivera avec le branchement Google Sheets.</p></div>
+    <div class="card"><h2>💾 Données</h2>
+      <div class="row"><button class="btn btn-ghost grow" onclick="exportJSON()">⬇ Sauvegarde</button><button class="btn btn-ghost grow" onclick="document.getElementById('imp').click()">⬆ Restaurer</button><input type="file" id="imp" accept="application/json" style="display:none" onchange="importJSON(this)"></div>
+      <p class="hint">Appli de test — données sur cet appareil. Pense à sauvegarder.</p></div>
+  </section>
+</main>
+
+<!-- ====== CANAL 3 : fiche d'émargement HTML ====== -->
+<div id="app-emarg">
+  <div class="em-head"><img id="logo2" alt="CDES"><div><h1>Quart d'Heure Prévention / Mise au travail</h1><p>Fiche d'émargement — CDES</p></div></div>
+  <div class="em-wrap">
+    <div id="em-banner"></div>
+
+    <div class="card"><h2>➢ Informations générales</h2>
+      <div class="row">
+        <div class="grow"><label class="f">Chantier *</label><input type="text" id="e-chantier" list="dl-ch2" placeholder="Nom du chantier"><datalist id="dl-ch2"></datalist></div>
+        <div style="width:160px"><label class="f">Date *</label><input type="date" id="e-date"></div>
+      </div>
+      <div class="row">
+        <div class="grow"><label class="f">Animateur du QHP / Mise au travail *</label><input type="text" id="e-anim" list="dl-cond2" placeholder="Qui anime ?"><datalist id="dl-cond2"></datalist></div>
+        <div style="width:160px"><label class="f">Durée du QHP</label><input type="text" id="e-duree" placeholder="15 min"></div>
+      </div>
+    </div>
+
+    <div class="card"><h2>➢ Flashs HSE présentés / thèmes abordés *</h2>
+      <textarea id="e-theme" placeholder="Ex. Flash ATAA — écrasement de la main lors d'un levage / Règle qui sauve n°2"></textarea></div>
+
+    <div class="card"><h2>➢ Description de l'opération prévue / en cours</h2>
+      <textarea id="e-operation" placeholder="Ce que l'équipe va faire aujourd'hui…"></textarea></div>
+
+    <div class="card"><h2>✔ Points de contrôle</h2>
+      <div class="em-q"><span class="lbl">Les risques liés à l'opération de travail ont été abordés ?</span><span id="yn-risques"></span></div>
+      <div class="em-q sub"><span class="lbl">⇨ Les risques principaux sont :</span></div>
+      <textarea id="e-risques" placeholder="Ex. chute à l'eau, ligne de tir, co-activité engin/piéton…"></textarea>
+      <div class="em-q"><span class="lbl">Tous les intervenants sont formés pour la tâche en cours ?</span><span id="yn-formes"></span></div>
+      <div class="em-q"><span class="lbl">Nouvel arrivant présent / intérimaire ?</span><span id="yn-nouvel"></span></div>
+      <div class="em-q sub" id="q-accueil"><span class="lbl">⇨ Accueil Sécurité réalisé ?</span><span id="yn-accueil"></span></div>
+      <div class="em-q"><span class="lbl">Les EPI sont portés ?</span><span id="yn-epi"></span></div>
+    </div>
+
+    <div class="card"><h2>✍️ Nom des participants &amp; signatures</h2>
+      <p class="small muted">Coche les présents, puis fais signer chacun avec le doigt dans la case.</p>
+      <div class="row no-print" style="margin:8px 0 4px"><input type="text" id="e-search" class="grow" placeholder="🔎 Chercher un collaborateur…" oninput="renderEmargPick()"><button class="btn btn-ghost btn-sm" onclick="emargClear()">Tout décocher</button></div>
+      <div id="e-names" style="max-height:290px;overflow:auto;border:1px solid var(--line);border-radius:11px;padding:6px;background:#fbfdff"></div>
+      <h3>Signatures (<span id="e-nbsig">0</span>)</h3>
+      <div id="e-sigs"></div>
+      <div class="row" style="margin-top:8px"><input type="text" id="e-ext-nom" class="grow" placeholder="Intervenant extérieur (intérim, sous-traitant)"><input type="text" id="e-ext-soc" style="width:150px" placeholder="Société"><button class="btn btn-ghost btn-sm" onclick="addExterne()">＋ Ajouter</button></div>
+    </div>
+
+    <div class="card"><h2>➢ Dialogue, synthèse et engagement de l'équipe</h2>
+      <textarea id="e-dialogue" style="min-height:100px" placeholder="Remontées de l'équipe, engagements pris…"></textarea></div>
+
+    <div id="em-apres"></div>
+  </div>
+  <div class="em-bar no-print">
+    <button class="btn btn-ghost" onclick="closeEmarg()">Quitter</button>
+    <button class="btn btn-primary grow" onclick="saveEmarg()">✅ Valider la fiche d'émargement</button>
+  </div>
+</div>
+
+<nav class="tabs no-print">
+  <button class="on" data-v="v-accueil" onclick="go('v-accueil')"><span class="ic">🏠</span>Accueil</button>
+  <button data-v="v-fiches" onclick="go('v-fiches')"><span class="ic">📋</span>Historique</button>
+  <button data-v="v-mensuel" onclick="go('v-mensuel')"><span class="ic">📊</span>Mensuel</button>
+  <button data-v="v-annuel" onclick="go('v-annuel')"><span class="ic">📅</span>Annuel</button>
+  <button data-v="v-reglages" onclick="go('v-reglages')"><span class="ic">⚙️</span>Réglages</button>
+</nav>
+
+<div class="modal" id="m-fiche"><div class="sheet">
+  <div class="grab"></div><h2 id="m-fiche-title">Nouvelle fiche QHP</h2>
+  <div id="f-ia-etat"></div>
+  <div class="row"><div class="grow"><label class="f">Date *</label><input type="date" id="f-date"></div>
+    <div class="grow"><label class="f">Chantier</label><input type="text" id="f-chantier" list="dl-chantiers" placeholder="Nom du chantier" oninput="chantierPickConduc()"><datalist id="dl-chantiers"></datalist></div></div>
+  <label class="f">Thème / sujet *</label><input type="text" id="f-theme" placeholder="Ex. Ligne de tir lors du levage">
+  <label class="f">Conducteur / animateur</label><input type="text" id="f-cond" list="dl-conducteurs" placeholder="Qui a animé le QHP ?"><datalist id="dl-conducteurs"></datalist>
+  <label class="f">Remontées terrain / observations</label>
+  <textarea id="f-remontees" placeholder="Points remontés par l'équipe pendant le QHP…"></textarea>
+
+  <label class="f">Fiche d'émargement signée</label>
+  <div class="drop" id="f-drop" onclick="document.getElementById('f-pdf').click()">📎 Glisse un <b>PDF</b> ou une <b>photo</b> ici, ou touche pour choisir</div>
+  <div class="canaux no-print">
+    <div class="canal" onclick="document.getElementById('f-pdf').click()"><span class="ci">📄</span>PDF scanné</div>
+    <div class="canal" onclick="document.getElementById('f-photo').click()"><span class="ci">📷</span>Photo / appareil</div>
+  </div>
+  <input type="file" id="f-pdf" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif" multiple style="display:none" onchange="attachFiles(this.files);this.value=''">
+  <input type="file" id="f-photo" accept="image/*" capture="environment" multiple style="display:none" onchange="attachFiles(this.files);this.value=''">
+  <div id="f-pdf-info" class="hint"></div>
+  <div id="f-pieces" class="pieces"></div>
+  <button class="btn btn-ghost btn-block no-print" id="f-ia" onclick="lireFicheIA()" style="margin-top:8px;display:none">🤖 Lire la fiche automatiquement</button>
+
+  <label class="f" style="margin-top:14px">Participants</label>
+  <div class="recap" id="f-recap"></div>
+  <div class="row no-print" style="margin-bottom:2px"><input type="text" id="f-search" class="grow" placeholder="🔎 Filtrer…" oninput="renderPickNames()"><button class="btn btn-ghost btn-sm" onclick="allNames(true)">Tout</button><button class="btn btn-ghost btn-sm" onclick="allNames(false)">Rien</button></div>
+  <div id="f-names"></div>
+  <div class="row" style="margin-top:16px"><button class="btn btn-danger" id="f-del" onclick="deleteFiche()" style="display:none">🗑 Supprimer</button><button class="btn btn-ghost grow" onclick="closeModal()">Annuler</button><button class="btn btn-primary grow" onclick="saveFiche()">Enregistrer</button></div>
+</div></div>
+<div class="modal" id="m-detail"><div class="sheet" id="detail-body"></div></div>
+<div id="dropov"><div class="dob"><span class="ic">📎</span>Dépose ici le PDF ou la photo<span>elle sera jointe à la fiche QHP</span></div></div>
+<div id="toast"></div>
+
+<script src="js/logo.js"></script>
+<script src="js/qhp.js"></script>
+</body>
+</html>
