@@ -284,6 +284,7 @@ async function syncAppel(payload,ms){
 function appliquerSync(d){
   if(Array.isArray(d.qhps))state.qhps=d.qhps;
   if(Array.isArray(d.roster))state.roster=d.roster.map(p=>Object.assign({dateAjout:'',dateDepart:'',agence:'IDF'},p));
+  state.rosterSource=d.rosterSource==='referentiel'?'referentiel':'appli';   // V2.1 : liste tenue dans le Référentiel CDES
   if(Array.isArray(d.chantiers))state.chantiers=d.chantiers;
   if(Array.isArray(d.secteurs)&&d.secteurs.length)state.secteurs=d.secteurs;
   if(d.tombQhps)state.tomb.qhps=d.tombQhps;
@@ -767,23 +768,27 @@ function renderReglages(){
   if(flt==='(conducteurs)')list=state.roster.filter(p=>p.conducteur);
   else if(flt.startsWith('Agence '))list=state.roster.filter(p=>(p.agence||'IDF')===flt.slice(7));
   else if(flt!=='(tous)')list=state.roster.filter(p=>(state.secteurs.includes(p.secteur)?p.secteur:'(sans groupe)')===flt);
+  const ref=rosterReferentiel();
+  document.getElementById('roster-ref').style.display=ref?'':'none';document.getElementById('roster-ajout').style.display=ref?'none':'';
   const g=grouper(list);let h='';
   Object.keys(g).forEach(sec=>{h+=`<h3>${esc(sec)} (${g[sec].length})</h3><div class="tbl-wrap"><table><tbody>`;
     g[sec].forEach(p=>{const idx=state.roster.indexOf(p);
       const st=p.dateDepart?('<span class="pill warn">parti '+moisLbl(p.dateDepart)+'</span>'):(p.dateAjout?('<span class="pill mid">dès '+moisLbl(p.dateAjout)+'</span>'):'');
       h+=`<tr><td>${esc(p.name)}${agPill(p.agence)}${p.conducteur?' <span class="pill ok">conducteur</span>':''} ${st}</td>
-        <td style="width:190px;text-align:right;white-space:nowrap">${p.dateDepart?'':'<button class="btn btn-ghost btn-sm" onclick="retirer('+idx+')">↩ Départ</button> '}<button class="btn btn-danger btn-sm" onclick="delName(${idx})">🗑 Supprimer</button></td></tr>`});
+        ${ref?'':`<td style="width:190px;text-align:right;white-space:nowrap">${p.dateDepart?'':'<button class="btn btn-ghost btn-sm" onclick="retirer('+idx+')">↩ Départ</button> '}<button class="btn btn-danger btn-sm" onclick="delName(${idx})">🗑 Supprimer</button></td>`}</tr>`});
     h+='</tbody></table></div>'});
   document.getElementById('roster-edit').innerHTML=h||'<p class="hint">Aucun collaborateur.</p>';
   document.getElementById('ch-list').innerHTML=state.chantiers.length?('<div class="tbl-wrap"><table><thead><tr><th>Chantier</th><th>Conducteur</th><th></th></tr></thead><tbody>'+state.chantiers.map((c,i)=>`<tr><td>${esc(c.nom)}</td><td>${esc(c.cond||'—')}</td><td style="width:40px;text-align:right"><button class="btn btn-ghost btn-sm" onclick="delChantier(${i})">🗑</button></td></tr>`).join('')+'</tbody></table></div>'):'<p class="hint">Aucun chantier (ils se créent depuis les fiches).</p>'}
+function rosterReferentiel(){return state.rosterSource==='referentiel'}
+function refBloque(){if(!rosterReferentiel())return false;toast('Liste tenue dans le Référentiel CDES : modifie-la là-bas',true);return true}
 function moisLbl(iso){return MOIS_S[(+iso.slice(5,7))-1].replace('.','')+' '+iso.slice(0,4)}
 function addSecteur(){const el=document.getElementById('new-sec');const s=el.value.trim();if(!s)return;if(state.secteurs.some(x=>x.toLowerCase()===s.toLowerCase())){toast('Déjà présent',true);return}state.secteurs.push(s);delete state.tomb.secteurs[s];save();el.value='';renderReglages();toast('Groupe ajouté');syncAuto()}
 function delSecteur(i){const s=state.secteurs[i];const n=state.roster.filter(p=>p.secteur===s).length;if(!confirm('Retirer le groupe « '+s+' » ?'+(n?'\n'+n+' personne(s) passeront en « sans groupe ».':'')))return;state.roster.forEach(p=>{if(p.secteur===s){p.secteur='';p.maj=nowISO()}});state.tomb.secteurs[s]=nowISO();state.secteurs.splice(i,1);save();renderReglages();toast('Groupe retiré');syncAuto()}
-function addName(){const el=document.getElementById('new-name');const n=el.value.trim();if(!n){toast('Renseigne le nom',true);return}if(state.roster.some(p=>p.name.toLowerCase()===n.toLowerCase())){toast('Déjà présent',true);return}
+function addName(){if(refBloque())return;const el=document.getElementById('new-name');const n=el.value.trim();if(!n){toast('Renseigne le nom',true);return}if(state.roster.some(p=>p.name.toLowerCase()===n.toLowerCase())){toast('Déjà présent',true);return}
   state.roster.push({name:n,secteur:document.getElementById('new-name-sec').value||'',agence:document.getElementById('new-name-ag').value||'IDF',conducteur:document.getElementById('new-name-cond').checked,dateAjout:todayISO,dateDepart:'',maj:nowISO()});
   delete state.tomb.roster[n];save();el.value='';document.getElementById('new-name-cond').checked=false;renderReglages();toast('« '+n+' » ajouté (actif dès le mois prochain)');syncAuto()}
-function retirer(i){const p=state.roster[i];if(!confirm('Départ de « '+p.name+' » aujourd\'hui ?\nLes mois suivants seront grisés, l\'historique est conservé.'))return;p.dateDepart=todayISO;p.maj=nowISO();save();renderReglages();toast('Départ enregistré');syncAuto()}
-function delName(i){const p=state.roster[i];if(!confirm('SUPPRIMER définitivement « '+p.name+' » ?\n\nPour garder l\'historique, utilise plutôt « ↩ Départ ».'))return;
+function retirer(i){if(refBloque())return;const p=state.roster[i];if(!confirm('Départ de « '+p.name+' » aujourd\'hui ?\nLes mois suivants seront grisés, l\'historique est conservé.'))return;p.dateDepart=todayISO;p.maj=nowISO();save();renderReglages();toast('Départ enregistré');syncAuto()}
+function delName(i){if(refBloque())return;const p=state.roster[i];if(!confirm('SUPPRIMER définitivement « '+p.name+' » ?\n\nPour garder l\'historique, utilise plutôt « ↩ Départ ».'))return;
   state.tomb.roster[p.name]=nowISO();state.roster.splice(i,1);save();renderReglages();toast('Supprimé');syncAuto()}
 function delChantier(i){if(!confirm('Retirer « '+state.chantiers[i].nom+' » ?'))return;
   state.tomb.chantiers[state.chantiers[i].id]=nowISO();state.chantiers.splice(i,1);save();renderReglages();toast('Retiré');syncAuto()}

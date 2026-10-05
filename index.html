@@ -39,6 +39,8 @@
 
   <section class="view" id="v-reglages">
     <div class="card"><h2>👥 Collaborateurs</h2>
+      <div id="roster-ref" class="banner ok" style="display:none">📇 <b>Liste tenue dans le Référentiel CDES.</b> Pour ajouter quelqu'un, noter un départ, changer une agence, un groupe ou un rôle de conducteur : modifie le classeur « Référentiel CDES » (colonne qhp = oui). La liste se met à jour ici à la synchro suivante (10 minutes au plus).</div>
+      <div id="roster-ajout">
       <p class="small muted">Ajoute, retire ou supprime une personne. « Départ » conserve l'historique et grise les mois suivants ; « Supprimer » efface la personne.</p>
       <label class="f">Nom (Prénom NOM)</label><input type="text" id="new-name" placeholder="Ex. Jean DUPONT">
       <div class="row">
@@ -47,6 +49,7 @@
       </div>
       <label style="display:flex;align-items:center;gap:7px;font-size:14px;margin-top:8px"><input type="checkbox" id="new-name-cond" style="width:auto"> Conducteur de travaux</label>
       <button class="btn btn-primary btn-block" style="margin-top:8px" onclick="addName()">＋ Ajouter</button>
+      </div>
       <label class="f" style="margin-top:14px">Filtrer la liste</label><select id="reg-filtre" onchange="renderReglages()"></select>
       <div id="roster-edit" style="margin-top:10px"></div>
     </div>
