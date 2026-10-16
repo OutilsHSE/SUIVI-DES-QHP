@@ -5,11 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#003A6E">
 <title>Suivi des QHP — CDES</title>
-<link rel="stylesheet" href="css/qhp.css?v=2.2.1">
+<link rel="stylesheet" href="css/qhp.css?v=2.2.2">
 <style>
 /* V2.2.1 — trois onglets, plusieurs fiches d’un coup, certitude de lecture ; V2.2.1 : stockage local indisponible signalé, fichiers versionnés */
 .suivi-seg{display:flex;margin:0 0 12px}.suivi-seg button{flex:1}
-.gros-lot .gi{background:linear-gradient(135deg,#7A4FC0,#9b74da)!important}
+/* V2.2.2 : l'encadré « Je dépose plusieurs fiches » était blanc sur blanc (la feuille css/qhp.css ne connaît pas ce 3e bouton) : couleurs posées ici, sans dépendre d'elle */
+.gros-lot{background:linear-gradient(135deg,#7A4FC0,#5A3A9A)!important;color:#fff!important;border-color:#5A3A9A!important}
+.gros-lot .gi{background:rgba(255,255,255,.2)!important;color:#fff!important}
+.gros-lot .gt,.gros-lot b,.gros-lot small{color:#fff!important}.gros-lot small{opacity:.9}
 .acc-titre .nbv{display:inline-block;min-width:24px;padding:1px 8px;border-radius:999px;background:#C25A08;color:#fff;font-size:14px;text-align:center;vertical-align:middle}
 .acc-tout{float:right;font-size:13px;font-weight:600;text-transform:none;letter-spacing:0}
 .brl{display:flex;flex-direction:column;gap:10px;margin-bottom:18px}
@@ -223,7 +226,7 @@
 <div id="dropov"><div class="dob"><span class="ic">📎</span>Dépose ici le PDF ou la photo<span>elle sera jointe à la fiche QHP</span></div></div>
 <div id="toast"></div>
 
-<script src="js/logo.js?v=2.2.1"></script>
-<script src="js/qhp.js?v=2.2.1"></script>
+<script src="js/logo.js?v=2.2.2"></script>
+<script src="js/qhp.js?v=2.2.2"></script>
 </body>
 </html>
