@@ -5,7 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#003A6E">
 <title>Suivi des QHP — CDES</title>
-<link rel="stylesheet" href="css/qhp.css">
+<link rel="stylesheet" href="css/qhp.css?v=2.2.1">
+<style>
+/* V2.2.1 — trois onglets, plusieurs fiches d’un coup, certitude de lecture ; V2.2.1 : stockage local indisponible signalé, fichiers versionnés */
+.suivi-seg{display:flex;margin:0 0 12px}.suivi-seg button{flex:1}
+.gros-lot .gi{background:linear-gradient(135deg,#7A4FC0,#9b74da)!important}
+.acc-titre .nbv{display:inline-block;min-width:24px;padding:1px 8px;border-radius:999px;background:#C25A08;color:#fff;font-size:14px;text-align:center;vertical-align:middle}
+.acc-tout{float:right;font-size:13px;font-weight:600;text-transform:none;letter-spacing:0}
+.brl{display:flex;flex-direction:column;gap:10px;margin-bottom:18px}
+.brc{background:#fff;border:1px solid #dbe4ee;border-left:5px solid #1F6FB2;border-radius:12px;padding:10px 12px;box-shadow:0 2px 8px rgba(15,45,80,.05)}
+.brc.attente,.brc.lecture{border-left-color:#B4720A;opacity:.85}.brc.erreur{border-left-color:#C22B22}
+.brh{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:14px}
+.brt{font-size:13.5px;color:#4c6379;margin:3px 0 6px}
+.brn{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+.bn{font-size:12px;padding:2px 8px;border-radius:999px;background:#eef8f2;color:#146C3A;font-weight:600}
+.bn.inc{background:#fff3e0;color:#9a5b00;outline:1px dashed #E8720C}.bn.inc i{font-style:normal;opacity:.8}
+.bn.ko{background:#fdeceb;color:#a3231c}
+.bra{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.bra .grow{flex:1}
+.taux{margin-left:auto;font-size:12px;font-weight:800;padding:2px 9px;border-radius:999px}
+.taux.ok{background:#e3f4ea;color:#146C3A}.taux.mid{background:#fff3e0;color:#9a5b00}.taux.ko{background:#fdeceb;color:#a3231c}
+.nm.incertain{background:#fff3e0!important;outline:2px dashed #E8720C;outline-offset:-2px}
+.nondech{color:#a3231c}
+</style>
 </head>
 <body>
 <header><img id="logo" alt="CDES"><div class="ht"><h1>Suivi des QHP</h1><p>Quart d'Heure Prévention — CDES</p></div><button class="syncpill no-print" id="sync-pill" onclick="syncNow(true)" style="display:none">🔄 Synchroniser</button></header>
@@ -15,21 +36,28 @@
     <h2 class="acc-titre">Enregistrer un QHP</h2>
     <button class="gros gros-scan no-print" onclick="document.getElementById('scan-in').click()"><span class="gi">📄</span><span class="gt"><b>Je scanne ma fiche</b><small>PDF ou photo de la fiche papier signée : l'IA remplit les champs, je vérifie et j'enregistre</small></span></button>
     <input type="file" id="scan-in" accept="application/pdf,image/*" multiple style="display:none" onchange="scanFiche(this.files);this.value=''">
+    <button class="gros gros-lot no-print" onclick="document.getElementById('lot-in').click()"><span class="gi">📚</span><span class="gt"><b>Je dépose plusieurs fiches</b><small>Les fiches de plusieurs QHP d'un coup (une fiche = un fichier) : l'IA les lit une par une, je vérifie chacune ci-dessous</small></span></button>
+    <input type="file" id="lot-in" accept="application/pdf,image/*" multiple style="display:none" onchange="deposerPlusieurs(this.files);this.value=''">
     <button class="gros gros-saisie no-print" onclick="openFiche()"><span class="gi">✏️</span><span class="gt"><b>Je saisis mon QHP</b><small>Date, chantier, thème, participants : je remplis les champs moi-même</small></span></button>
     <p class="acc-sec no-print"><a href="#" onclick="goEmarg();return false">✍️ Ou faire signer l'équipe directement sur le téléphone</a></p>
+    <div id="acc-verif"></div>
+    <div id="acc-fiches"></div>
   </section>
 
   <section class="view" id="v-fiches">
+    <button class="btn btn-ghost btn-sm no-print" onclick="go('v-accueil')">← Accueil</button>
     <h2 class="acc-titre">Fiches QHP enregistrées</h2>
     <div id="fiches-list"></div>
   </section>
 
   <section class="view" id="v-mensuel">
+    <div class="seg suivi-seg no-print"><button data-s="v-mensuel" onclick="goSuivi('v-mensuel')">📊 Ce mois</button><button data-s="v-annuel" onclick="goSuivi('v-annuel')">📅 L'année</button></div>
     <div class="card no-print"><div class="row" style="align-items:flex-end"><div class="grow"><label class="f">Mois</label><input type="month" id="bilan-mois" onchange="renderMensuel()"></div><button class="btn btn-ghost btn-sm" onclick="setMoisCourant()">Ce mois</button></div></div>
     <div id="mensuel-body"></div>
   </section>
 
   <section class="view" id="v-annuel">
+    <div class="seg suivi-seg no-print"><button data-s="v-mensuel" onclick="goSuivi('v-mensuel')">📊 Ce mois</button><button data-s="v-annuel" onclick="goSuivi('v-annuel')">📅 L'année</button></div>
     <div class="card no-print"><div class="row" style="align-items:center;justify-content:space-between">
       <div class="seg"><button id="tg-collab" class="on" onclick="setAnnuel('collab')">Collaborateurs</button><button id="tg-cond" onclick="setAnnuel('cond')">Conducteurs</button></div>
       <div class="row" style="align-items:center;gap:6px"><button class="btn btn-ghost btn-sm" onclick="chgAnnee(-1)">◀</button><b id="an-annee" style="font-size:18px;color:var(--marine)"></b><button class="btn btn-ghost btn-sm" onclick="chgAnnee(1)">▶</button></div>
@@ -159,9 +187,7 @@
 
 <nav class="tabs no-print">
   <button class="on" data-v="v-accueil" onclick="go('v-accueil')"><span class="ic">🏠</span>Accueil</button>
-  <button data-v="v-fiches" onclick="go('v-fiches')"><span class="ic">📋</span>Historique</button>
-  <button data-v="v-mensuel" onclick="go('v-mensuel')"><span class="ic">📊</span>Mensuel</button>
-  <button data-v="v-annuel" onclick="go('v-annuel')"><span class="ic">📅</span>Annuel</button>
+  <button data-v="suivi" onclick="goSuivi()"><span class="ic">📊</span>Suivi</button>
   <button data-v="v-reglages" onclick="go('v-reglages')"><span class="ic">⚙️</span>Réglages</button>
 </nav>
 
@@ -197,7 +223,7 @@
 <div id="dropov"><div class="dob"><span class="ic">📎</span>Dépose ici le PDF ou la photo<span>elle sera jointe à la fiche QHP</span></div></div>
 <div id="toast"></div>
 
-<script src="js/logo.js"></script>
-<script src="js/qhp.js"></script>
+<script src="js/logo.js?v=2.2.1"></script>
+<script src="js/qhp.js?v=2.2.1"></script>
 </body>
 </html>

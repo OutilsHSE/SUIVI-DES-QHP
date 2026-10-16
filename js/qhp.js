@@ -40,7 +40,7 @@ function saveConf(){conf.objPart=Math.max(0,Math.min(100,parseInt(document.getEl
   try{localStorage.setItem(LS_CONF,JSON.stringify(conf))}catch(e){}save();syncAuto()}
 /* PDF idb */
 function idb(){return new Promise((res,rej)=>{const r=indexedDB.open('qhp_pdf',1);r.onupgradeneeded=()=>r.result.createObjectStore('pdf');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
-async function pdfPut(id,v){try{const db=await idb();await new Promise((r,j)=>{const t=db.transaction('pdf','readwrite');t.objectStore('pdf').put(v,id);t.oncomplete=r;t.onerror=()=>j(t.error)})}catch(e){}}
+async function pdfPut(id,v){try{const db=await idb();await new Promise((r,j)=>{const t=db.transaction('pdf','readwrite');t.objectStore('pdf').put(v,id);t.oncomplete=r;t.onerror=()=>j(t.error)});return true}catch(e){return false}}   // V2.2.1 : dit si c'est rangé
 async function pdfGet(id){try{const db=await idb();return await new Promise((r,j)=>{const t=db.transaction('pdf','readonly');const q=t.objectStore('pdf').get(id);q.onsuccess=()=>r(q.result||null);q.onerror=()=>j(q.error)})}catch(e){return null}}
 async function pdfDel(id){try{const db=await idb();await new Promise((r,j)=>{const t=db.transaction('pdf','readwrite');t.objectStore('pdf').delete(id);t.oncomplete=r;t.onerror=()=>j(t.error)})}catch(e){}}
 /* helpers */
@@ -62,10 +62,17 @@ function toggleExclu(name,y,i){const k=mkey(y,i);if(!state.exclus[k])state.exclu
   if(state.exclus[k][name]){delete state.exclus[k][name];if(!Object.keys(state.exclus[k]).length)delete state.exclus[k]}else state.exclus[k][name]='N/A';
   state.majDico.exclus[k+'|'+name]=nowISO();save();renderAnnuel();syncAuto()}
 function agPill(a){return a&&a!=='IDF'?'<span class="agpill '+esc(a)+'">'+esc(a)+'</span>':''}
-function go(v){document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));document.getElementById(v).classList.add('active');document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));if(v==='v-mensuel')renderMensuel();if(v==='v-annuel')renderAnnuel();if(v==='v-reglages')renderReglages();if(v==='v-fiches')renderFiches();if(v==='v-accueil')renderAccueil();window.scrollTo(0,0)}
+/* V2.2 — trois onglets : 🏠 Accueil (enregistrer + à vérifier + dernières fiches),
+   📊 Suivi (ce mois / l'année), ⚙️ Réglages. L'historique complet s'ouvre depuis l'accueil. */
+let suiviVue=(function(){try{return localStorage.getItem('qhp_suivi_vue')||'v-mensuel'}catch(e){return 'v-mensuel'}})();
+function goSuivi(v){if(v)suiviVue=v;try{localStorage.setItem('qhp_suivi_vue',suiviVue)}catch(e){}go(suiviVue)}
+function ongletDe(v){return (v==='v-mensuel'||v==='v-annuel')?'suivi':(v==='v-fiches'?'v-accueil':v)}
+function go(v){document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));document.getElementById(v).classList.add('active');document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.v===ongletDe(v)));
+  document.querySelectorAll('.suivi-seg button').forEach(b=>b.classList.toggle('on',b.dataset.s===v));if(v==='v-mensuel')renderMensuel();if(v==='v-annuel')renderAnnuel();if(v==='v-reglages')renderReglages();if(v==='v-fiches')renderFiches();if(v==='v-accueil')renderAccueil();window.scrollTo(0,0)}
 
 /* ===== Accueil : deux commandes, scanner ou saisir ===== */
 function renderAccueil(){const b=document.getElementById('acc-etat');if(!b)return;
+  renderBrouillons();renderDernieres();
   b.innerHTML=syncConfigure()?'':'<div class="banner">🔌 <b>Appareil non branché.</b> Ouvre le Suivi des QHP depuis la tuile de l\'intranet HSE : la lecture automatique des fiches et l\'envoi au suivi seront activés. En attendant, ce que tu saisis reste sur cet appareil.</div>'}
 function iaEtat(genre,txt){const b=document.getElementById('f-ia-etat');if(!b)return;
   b.innerHTML=txt?'<div class="banner '+(genre==='ok'?'ok':genre==='err'?'err':genre==='run'?'run':'')+'">'+txt+'</div>':''}
@@ -80,7 +87,7 @@ function renderFiches(){const box=document.getElementById('fiches-list');const l
   if(!list.length){box.innerHTML='<div class="empty"><div class="big">📋</div>Aucune fiche QHP pour l\'instant.<br>Enregistre ton premier QHP depuis l\'onglet « Accueil ».</div>';return}
   box.innerHTML=list.map(q=>{const d=new Date((q.date||'')+'T00:00');const nb=Object.values(q.present||{}).filter(Boolean).length;
     return `<div class="qhp" onclick="openDetail('${q.id}')"><div class="d"><b>${isNaN(d)?'?':d.getDate()}</b><span>${isNaN(d)?'':MOIS_S[d.getMonth()].replace('.','')}</span></div><div class="i"><div class="t">${esc(q.theme||'(sans thème)')}</div><div class="s">${esc(q.chantier||'—')}${q.cond?' · '+esc(q.cond):''} · ${nb} participant${nb>1?'s':''}${nbPieces(q)?' · 📎'+(nbPieces(q)>1?nbPieces(q):''):''}${q.emarg?' · ✍️':''}${q.remontees?' · 💬':''}</div></div><div>›</div></div>`}).join('')}
-async function openFiche(id){editId=id||null;const q=id?state.qhps.find(x=>x.id===id):null;iaEtat('','');
+async function openFiche(id){editId=id||null;brouillonOuvert=null;certitudesFiche={};lusFiche={};const q=id?state.qhps.find(x=>x.id===id):null;iaEtat('','');
   piecesPending=id?await piecesGetOuTelecharger(id):[];
   document.getElementById('m-fiche-title').textContent=q?'Modifier la fiche QHP':'Nouvelle fiche QHP';
   document.getElementById('f-date').value=q?q.date:todayISO;document.getElementById('f-theme').value=q?q.theme||'':'';
@@ -105,7 +112,7 @@ function renderPickNames(){const term=(document.getElementById('f-search').value
   const list=actifs().filter(p=>p.name.toLowerCase().includes(term));const g=grouper(list);let h='';
   Object.keys(g).forEach(sec=>{const people=g[sec];if(!people.length)return;const on=people.filter(p=>pickPres[p.name]).length;
     h+=`<div class="secgrp"><div class="sh"><span>${esc(sec)}</span><span class="cnt">${on}/${people.length} · <a href="#" onclick="secAll('${esc(sec).replace(/'/g,"\\'")}',true);return false">tout</a> · <a href="#" onclick="secAll('${esc(sec).replace(/'/g,"\\'")}',false);return false">rien</a></span></div><div class="names">`;
-    h+=people.map(p=>`<div class="nm ${pickPres[p.name]?'on':''}" onclick="togglePick(this,'${esc(p.name).replace(/'/g,"\\'")}')"><span class="bx">${pickPres[p.name]?'✓':''}</span><span class="nn">${esc(p.name)}${p.conducteur?' 🎓':''}${agPill(p.agence)}</span></div>`).join('');h+='</div></div>'});
+    h+=people.map(p=>`<div class="nm ${pickPres[p.name]?'on':''} ${(certitudesFiche[p.name]||100)<85?'incertain':''}" title="${(certitudesFiche[p.name]||100)<85?'lu « '+esc(lusFiche[p.name]||'')+' » — '+certitudesFiche[p.name]+' % : vérifie':''}" onclick="togglePick(this,'${esc(p.name).replace(/'/g,"\\'")}')"><span class="bx">${pickPres[p.name]?'✓':''}</span><span class="nn">${esc(p.name)}${p.conducteur?' 🎓':''}${agPill(p.agence)}</span></div>`).join('');h+='</div></div>'});
   box.innerHTML=h||'<div class="hint">Aucun collaborateur actif.</div>';renderRecap()}
 function togglePick(el,n){pickPres[n]=!pickPres[n];el.classList.toggle('on',pickPres[n]);el.querySelector('.bx').textContent=pickPres[n]?'✓':'';renderRecap()}
 function secAll(sec,v){const g=grouper(actifs());(g[sec]||[]).forEach(p=>pickPres[p.name]=v);renderPickNames()}
@@ -198,7 +205,8 @@ async function saveFiche(){const date=document.getElementById('f-date').value,th
   if(q.chantier){const ex=state.chantiers.find(c=>c.nom.toLowerCase()===q.chantier.toLowerCase());if(ex){ex.nom=q.chantier;if(q.cond)ex.cond=q.cond;ex.maj=nowISO()}else state.chantiers.push({id:uid(),nom:q.chantier,cond:q.cond||'',maj:nowISO()})}
   if(Array.isArray(piecesPending)){await piecesPut(q.id,piecesPending);
     q.pieces=piecesPending.map(p=>({name:p.name,type:p.type}));q.hasPdf=piecesPending.length>0;q.pdfName=piecesPending.length?piecesPending[0].name:''}
-  save();closeModal();renderFiches();toast(editId?'Fiche mise à jour ✓':'Fiche enregistrée ✓');
+  if(brouillonOuvert){const bid=brouillonOuvert;state.brouillons=brouillons().filter(x=>x.id!==bid);pdfDel('br_'+bid);brouillonOuvert=null}
+  save();closeModal();renderFiches();renderAccueil();toast(editId?'Fiche mise à jour ✓':'Fiche enregistrée ✓');
   syncAuto(q.id)}
 function deleteFiche(){if(!editId)return;if(!confirm('Supprimer cette fiche QHP ?'))return;pdfDel(editId);pdfDel('sig_'+editId);
   state.tomb.qhps[editId]=nowISO();state.qhps=state.qhps.filter(x=>x.id!==editId);save();closeModal();renderFiches();toast('Fiche supprimée');syncAuto()}
@@ -306,7 +314,7 @@ async function syncNow(manuel){
     for(const id of syncFile){try{await pousserPieces(id)}catch(e){reste.push(id)}}
     syncFile=reste;
     conf.dernierSync=nowISO();try{localStorage.setItem(LS_CONF,JSON.stringify(conf))}catch(e){}
-    renderFiches();
+    renderFiches();renderDernieres();
     if(document.getElementById('v-annuel').classList.contains('active'))renderAnnuel();
     if(document.getElementById('v-mensuel').classList.contains('active'))renderMensuel();
     if(document.getElementById('v-reglages').classList.contains('active'))renderReglages();
@@ -406,24 +414,123 @@ async function lireFicheIA(){
   try{
     const j=await syncAppel({secret:conf.secret,action:'lire-fiche',appareil:conf.appareil,
       nom:p.name,type:p.type,dataUrl:p.data,roster:actifs().map(x=>x.name)},120000);
-    const e=j.extrait||{};
-    if(e.date&&/^\d{4}-\d{2}-\d{2}$/.test(e.date))document.getElementById('f-date').value=e.date;
-    if(e.chantier)document.getElementById('f-chantier').value=e.chantier;
-    if(e.animateur)document.getElementById('f-cond').value=e.animateur;
-    if(e.theme)document.getElementById('f-theme').value=e.theme;
-    if(e.remontees)document.getElementById('f-remontees').value=e.remontees;
-    (e.noms||[]).forEach(n=>{if(state.roster.some(p2=>p2.name===n))pickPres[n]=true});
-    renderPickNames();
-    const nbN=(e.noms||[]).length;
-    iaEtat('ok','✅ <b>Champs remplis par l\'IA</b> · '+nbN+' participant'+(nbN>1?'s':'')+' reconnu'+(nbN>1?'s':'')+'. Vérifie, corrige si besoin, puis touche <b>Enregistrer</b> en bas.');
-    toast(nbN+' nom(s) reconnu(s) ✓ — vérifie avant d\'enregistrer');
-    let av='';
-    if((e.ambigus||[]).length)av+='<br><span style="color:var(--mid)">🤔 Impossible de trancher : '+
-      e.ambigus.map(a=>esc(a.lu)+' → '+a.candidats.map(esc).join(' ou ')).join(' · ')+' — coche à la main</span>';
-    if((e.nonReconnus||[]).length)av+='<br><span style="color:var(--mid)">⚠️ Lus mais hors liste : '+esc(e.nonReconnus.join(', '))+'</span>';
-    if(av)document.getElementById('f-pdf-info').innerHTML+=av;
+    appliquerExtrait(j.extrait||{});
   }catch(err){iaEtat('err','⚠️ Lecture automatique impossible ('+esc(err.message||'?')+'). La fiche reste jointe : remplis les champs à la main, ou réessaie avec « Lire la fiche automatiquement ».');toast('Lecture impossible : '+(err.message||'?'),true)}
   finally{if(btn){btn.disabled=false;btn.textContent='🤖 Lire la fiche automatiquement'}}}
+
+/* ===== V2.2 — résultat de la lecture IA appliqué à la fiche ouverte =====
+   Les noms rattachés avec moins de 85 % de certitude sont surlignés en orange dans la
+   liste des participants ; les noms lus mais non déchiffrés sont listés en rouge. */
+let certitudesFiche={}, lusFiche={};
+function tauxLecture(e){if(typeof e.taux==='number')return e.taux;const n=(e.noms||[]).length,t=n+(e.ambigus||[]).length+(e.nonReconnus||[]).length+(e.illisibles||0);return t?Math.round(100*n/t):0}
+function classeTaux(t){return t>=90?'ok':t>=70?'mid':'ko'}
+function appliquerExtrait(e){
+  e=e||{};
+  if(e.date&&/^\d{4}-\d{2}-\d{2}$/.test(e.date))document.getElementById('f-date').value=e.date;
+  if(e.chantier)document.getElementById('f-chantier').value=e.chantier;
+  if(e.animateur)document.getElementById('f-cond').value=e.animateur;
+  if(e.theme)document.getElementById('f-theme').value=e.theme;
+  if(e.remontees)document.getElementById('f-remontees').value=e.remontees;
+  certitudesFiche=e.certitudes||{};lusFiche=e.lus||{};
+  (e.noms||[]).forEach(n=>{if(state.roster.some(p2=>p2.name===n))pickPres[n]=true});
+  renderPickNames();
+  const nbN=(e.noms||[]).length, t=tauxLecture(e), inc=Object.keys(certitudesFiche).filter(n=>certitudesFiche[n]<85).length;
+  let msg='✅ <b>Champs remplis par l’IA</b> · '+nbN+' participant'+(nbN>1?'s':'')+' reconnu'+(nbN>1?'s':'')+' · <span class="taux '+classeTaux(t)+'">lecture '+t+' %</span>';
+  if(inc)msg+='<br>🟧 '+inc+' nom'+(inc>1?'s':'')+' rattaché'+(inc>1?'s':'')+' avec un doute : surligné'+(inc>1?'s':'')+' en orange dans la liste, vérifie-'+(inc>1?'les':'le')+'.';
+  if((e.ambigus||[]).length)msg+='<br>🤔 <b>À trancher</b> : '+e.ambigus.map(a=>'« '+esc(a.lu)+' » → '+a.candidats.map(esc).join(' ou ')).join(' · ')+' — coche à la main.';
+  if((e.nonReconnus||[]).length)msg+='<br><span class="nondech">🟥 <b>Non déchiffrés</b> : '+e.nonReconnus.map(n=>'« '+esc(n)+' »').join(', ')+' — personne de la liste ne correspond.</span>';
+  if(e.illisibles)msg+='<br><span class="nondech">🟥 '+e.illisibles+' mot'+(e.illisibles>1?'s':'')+' illisible'+(e.illisibles>1?'s':'')+' sur la fiche : compare avec le papier.</span>';
+  msg+='<br>Vérifie, corrige si besoin, puis touche <b>Enregistrer</b> en bas.';
+  iaEtat(t>=90&&!inc&&!(e.ambigus||[]).length&&!(e.nonReconnus||[]).length?'ok':'warn',msg);
+  toast(nbN+' nom(s) reconnu(s) ✓ — vérifie avant d’enregistrer');
+}
+
+/* ===== V2.2 — PLUSIEURS QHP D'UN COUP =====
+   On dépose les fiches de plusieurs QHP (une fiche = un fichier). Chaque fichier est
+   rangé sur l'appareil, lu par l'IA l'un après l'autre, et attend dans « À vérifier » :
+   on ouvre, on corrige, on enregistre. Rien n'est enregistré sans vérification. */
+let lectureEnCours=false, brouillonOuvert=null;
+function brouillons(){if(!Array.isArray(state.brouillons))state.brouillons=[];return state.brouillons}
+async function preparerPiece(f){
+  const isImg=(f.type||'').indexOf('image/')===0, isPdf=f.type==='application/pdf'||/\.pdf$/i.test(f.name||'');
+  if(!isImg&&!isPdf)throw new Error('format non géré');
+  const data=isImg?await compressImage(f):await readData(f);
+  if(data.length>4200000)throw new Error('trop lourd (> 3 Mo)');
+  return {name:f.name||(isImg?'photo.jpg':'emargement.pdf'),type:isImg?'image/jpeg':'application/pdf',data};
+}
+async function deposerPlusieurs(files){
+  files=Array.from(files||[]);if(!files.length)return;
+  let n=0;
+  for(const f of files){
+    try{const p=await preparerPiece(f);const id=uid();
+      if(!(await pdfPut('br_'+id,{items:[p]})))throw new Error('stockage indisponible sur cet appareil (navigation privée ?) — dépose les fiches une par une');
+      brouillons().push({id,nom:p.name,etat:'attente',cree:nowISO()});n++}
+    catch(e){toast((f.name||'Fichier')+' : '+e.message,true)}
+  }
+  save();renderAccueil();
+  if(n)toast(n+' fiche'+(n>1?'s':'')+' en lecture — une par une, garde la page ouverte');
+  lancerLectures();
+}
+async function lancerLectures(){
+  if(lectureEnCours)return;
+  if(!syncConfigure()){toast('Lecture automatique indisponible : appareil non branché. Ouvre chaque fiche pour la saisir.',true);return}
+  lectureEnCours=true;
+  try{
+    for(;;){
+      const b=brouillons().find(x=>x.etat==='attente');if(!b)break;
+      b.etat='lecture';save();renderBrouillons();
+      try{
+        const v=await pdfGet('br_'+b.id);const p=v&&v.items&&v.items[0];
+        if(!p)throw new Error('fichier introuvable sur cet appareil');
+        const j=await syncAppel({secret:conf.secret,action:'lire-fiche',appareil:conf.appareil,nom:p.name,type:p.type,dataUrl:p.data,roster:actifs().map(x=>x.name)},120000);
+        b.extrait=j.extrait||{};b.etat='pret';b.erreur='';
+      }catch(e){b.etat='erreur';b.erreur=(e&&e.message)||'erreur'}
+      save();renderBrouillons();
+    }
+  }finally{lectureEnCours=false}
+}
+function relireBrouillon(id){const b=brouillons().find(x=>x.id===id);if(!b)return;b.etat='attente';b.erreur='';save();renderBrouillons();lancerLectures()}
+function retirerBrouillon(id){if(!confirm('Retirer cette fiche de la liste « À vérifier » ? (rien n’est enregistré)'))return;
+  state.brouillons=brouillons().filter(x=>x.id!==id);pdfDel('br_'+id);save();renderBrouillons()}
+async function ouvrirBrouillon(id){
+  const b=brouillons().find(x=>x.id===id);if(!b)return;
+  await openFiche();
+  const v=await pdfGet('br_'+id);piecesPending=(v&&v.items)?v.items.slice():[];renderPieces();
+  document.getElementById('m-fiche-title').textContent='Fiche lue par l’IA — à vérifier';
+  if(b.extrait)appliquerExtrait(b.extrait);else iaEtat('warn','Lecture automatique non faite'+(b.erreur?' ('+esc(b.erreur)+')':'')+' : remplis les champs à la main.');
+  brouillonOuvert=id;
+}
+function renderBrouillons(){
+  const box=document.getElementById('acc-verif');if(!box)return;
+  const l=brouillons();
+  if(!lectureEnCours&&l.some(x=>x.etat==='lecture')){l.forEach(x=>{if(x.etat==='lecture')x.etat='attente'});setTimeout(lancerLectures,300)}
+  if(!l.length){box.innerHTML='';return}
+  const enAtt=l.filter(x=>x.etat==='attente'||x.etat==='lecture').length;
+  box.innerHTML='<h2 class="acc-titre">À vérifier <span class="nbv">'+l.length+'</span>'+(enAtt?' <small class="muted">· '+enAtt+' en lecture…</small>':'')+'</h2>'
+    +'<div class="brl">'+l.map(b=>{
+      const e=b.extrait||{}, t=b.etat==='pret'?tauxLecture(e):null;
+      const c=e.certitudes||{};
+      const noms=(e.noms||[]).map(n=>'<span class="bn '+((c[n]||100)<85?'inc':'')+'" title="'+((c[n]||100)<85?'lu « '+esc((e.lus||{})[n]||'')+' » · '+c[n]+' %':'')+'">'+esc(n)+((c[n]||100)<85?' <i>'+c[n]+' %</i>':'')+'</span>').join('');
+      const amb=(e.ambigus||[]).map(a=>'<span class="bn inc" title="à trancher">'+esc(a.lu)+' ?</span>').join('');
+      const nr=(e.nonReconnus||[]).map(n=>'<span class="bn ko" title="non déchiffré">'+esc(n)+'</span>').join('');
+      return '<div class="brc '+b.etat+'">'
+        +'<div class="brh"><b>'+(e.date?esc(frDate(e.date)):'Date ?')+'</b> · '+esc(e.chantier||'chantier ?')+(e.animateur?' · '+esc(e.animateur):'')
+        +(t!==null?'<span class="taux '+classeTaux(t)+'">lecture '+t+' %</span>':'')+'</div>'
+        +'<div class="brt">'+(b.etat==='attente'?'⏳ En attente de lecture':b.etat==='lecture'?'🤖 Lecture en cours…':b.etat==='erreur'?'⚠️ Lecture impossible : '+esc(b.erreur||'?'):esc(e.theme||'(thème non lu)'))+'</div>'
+        +(b.etat==='pret'?'<div class="brn">'+noms+amb+nr+(e.illisibles?'<span class="bn ko">'+e.illisibles+' illisible'+(e.illisibles>1?'s':'')+'</span>':'')+'</div>':'')
+        +'<div class="bra"><span class="small muted">📎 '+esc(b.nom)+'</span><span class="grow"></span>'
+        +(b.etat==='erreur'?'<button class="btn btn-ghost btn-sm" onclick="relireBrouillon(\''+b.id+'\')">↻ Relire</button>':'')
+        +'<button class="btn btn-ghost btn-sm" onclick="retirerBrouillon(\''+b.id+'\')">🗑</button>'
+        +'<button class="btn btn-primary btn-sm" '+(b.etat==='attente'||b.etat==='lecture'?'disabled':'')+' onclick="ouvrirBrouillon(\''+b.id+'\')">Vérifier et enregistrer</button></div></div>'}).join('')+'</div>';
+}
+function renderDernieres(){
+  const box=document.getElementById('acc-fiches');if(!box)return;
+  const list=[...state.qhps].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,5);
+  if(!list.length){box.innerHTML='';return}
+  box.innerHTML='<h2 class="acc-titre">Dernières fiches <a href="#" class="acc-tout" onclick="go(\'v-fiches\');return false">Tout l’historique ('+state.qhps.length+') ›</a></h2>'
+    +list.map(q=>{const d=new Date((q.date||'')+'T00:00');const nb=Object.values(q.present||{}).filter(Boolean).length;
+      return '<div class="qhp" onclick="openDetail(\''+q.id+'\')"><div class="d"><b>'+(isNaN(d)?'?':d.getDate())+'</b><span>'+(isNaN(d)?'':MOIS_S[d.getMonth()].replace('.',''))+'</span></div><div class="i"><div class="t">'+esc(q.theme||'(sans thème)')+'</div><div class="s">'+esc(q.chantier||'—')+(q.cond?' · '+esc(q.cond):'')+' · '+nb+' participant'+(nb>1?'s':'')+'</div></div></div>'}).join('');
+}
 
 /* ===== CANAL 3 : fiche d'émargement HTML ===== */
 let emargPick={},emargExt=[],emargSigs={},emargYN={risques:null,formes:null,nouvel:null,accueil:null,epi:null};
