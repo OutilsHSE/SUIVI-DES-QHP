@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#003A6E">
 <title>Suivi des QHP — CDES</title>
-<link rel="stylesheet" href="css/qhp.css?v=2.3">
+<link rel="stylesheet" href="css/qhp.css?v=3.0">
 <style>
+/* V3 (19/10/2026) — accueil en tableau, suivi annuel par défaut, cases cliquables, un seul écran Suivi. Styles V3 en fin de bloc. */
 /* V2.2.1 — trois onglets, plusieurs fiches d’un coup, certitude de lecture ; V2.2.1 : stockage local indisponible signalé, fichiers versionnés */
 .suivi-seg{display:flex;margin:0 0 12px}.suivi-seg button{flex:1}
 /* V2.2.2 : l'encadré « Je dépose plusieurs fiches » était blanc sur blanc (la feuille css/qhp.css ne connaît pas ce 3e bouton) : couleurs posées ici, sans dépendre d'elle */
@@ -29,6 +30,36 @@
 .taux.ok{background:#e3f4ea;color:#146C3A}.taux.mid{background:#fff3e0;color:#9a5b00}.taux.ko{background:#fdeceb;color:#a3231c}
 .nm.incertain{background:#fff3e0!important;outline:2px dashed #E8720C;outline-offset:-2px}
 .nondech{color:#a3231c}
+/* ===== V3 ===== */
+.acc-tab td,.acc-tab th{white-space:nowrap}.acc-tab td.suj{white-space:normal;min-width:180px;max-width:420px;color:var(--txt)}
+.acc-tab tr.cl{cursor:pointer}.acc-tab tr.cl:hover td{background:#eef5fb}
+.acc-tab td.nb{text-align:center;font-weight:700;color:var(--marine)}
+.acc-tab .dj{font-weight:700;color:var(--marine)}.acc-tab .dm{color:var(--muted);font-size:12px;margin-left:3px}
+.suivi-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.seg.big{border-radius:14px;border-width:2px}.seg.big button{padding:12px 22px;font-size:16px;font-weight:700}
+.seg.big button.on{background:var(--accent)}
+.selects{display:flex;gap:8px;flex-wrap:wrap}.selects select{width:auto;min-width:120px;padding:9px 32px 9px 11px;font-weight:600;color:var(--marine);appearance:none;-webkit-appearance:none;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23003A6E' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 11px center}
+.an td.sec span{position:sticky;left:10px;display:inline-block}   /* le nom du groupe reste visible quand le tableau défile (téléphone) */
+.an th.mo{cursor:pointer}.an th.mo:hover{background:var(--bleu)}.an th.mo.cur{background:var(--accent)}
+.an td.v,.an td.x,.an td.na,.an td.g{min-width:38px}.an td.x{font-size:15px}.an td.v{font-size:14px}
+.an td.g.dep{color:#8a98a6;font-size:10.5px;font-weight:600}
+.an td.n{font-weight:700;color:var(--marine);cursor:pointer}.an td.n.z{color:#c3ccd4;font-weight:500}
+.an td.tot{font-weight:800;color:var(--marine)}
+.legende{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin:8px 2px 0}
+.legende b{font-weight:800}.legende .lv{color:var(--ok)}.legende .lx{color:var(--warn)}
+.popcell{position:absolute;z-index:60;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px rgba(0,40,77,.18);min-width:250px;max-width:330px;padding:8px;font-size:13.5px}
+.popcell .pt{font-weight:700;color:var(--marine);padding:4px 6px 6px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.popcell .pt small{display:block;font-weight:500;color:var(--muted);font-size:12px}
+.popcell button{display:flex;width:100%;text-align:left;gap:8px;align-items:center;background:none;border:none;border-radius:9px;padding:9px 8px;font-family:inherit;font-size:13.5px;cursor:pointer;color:var(--txt)}
+.popcell button:hover{background:#eef5fb}.popcell button b{color:var(--marine)}
+.popcell button.q{padding-left:22px;font-size:13px}.popcell button.q small{color:var(--muted)}
+.popcell .sep{border-top:1px dashed var(--line);margin:5px 0}
+.mois-nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mois-nav b{font-size:19px;color:var(--marine);font-family:"Barlow Condensed",Arial;min-width:150px;text-align:center}
+.anim-tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:6px;background:#fff3e0;color:#9a5b00;margin-left:6px}
+.m-doublon .sheet{max-width:520px}
+.ref-liste{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+@media print{.suivi-bar,.legende{display:none!important}}
 </style>
 </head>
 <body>
@@ -53,24 +84,18 @@
     <div id="fiches-list"></div>
   </section>
 
-  <section class="view" id="v-mensuel">
-    <div class="seg suivi-seg no-print"><button data-s="v-mensuel" onclick="goSuivi('v-mensuel')">📊 Ce mois</button><button data-s="v-annuel" onclick="goSuivi('v-annuel')">📅 L'année</button></div>
-    <div class="card no-print"><div class="row" style="align-items:flex-end"><div class="grow"><label class="f">Mois</label><input type="month" id="bilan-mois" onchange="renderMensuel()"></div><button class="btn btn-ghost btn-sm" onclick="setMoisCourant()">Ce mois</button></div></div>
-    <div id="mensuel-body"></div>
-  </section>
-
-  <section class="view" id="v-annuel">
-    <div class="seg suivi-seg no-print"><button data-s="v-mensuel" onclick="goSuivi('v-mensuel')">📊 Ce mois</button><button data-s="v-annuel" onclick="goSuivi('v-annuel')">📅 L'année</button></div>
-    <div class="card no-print"><div class="row" style="align-items:center;justify-content:space-between">
-      <div class="seg"><button id="tg-collab" class="on" onclick="setAnnuel('collab')">Collaborateurs</button><button id="tg-cond" onclick="setAnnuel('cond')">Conducteurs</button></div>
-      <div class="row" style="align-items:center;gap:6px"><button class="btn btn-ghost btn-sm" onclick="chgAnnee(-1)">◀</button><b id="an-annee" style="font-size:18px;color:var(--marine)"></b><button class="btn btn-ghost btn-sm" onclick="chgAnnee(1)">▶</button></div>
-    </div><div id="an-filtre" style="margin-top:10px"></div></div>
-    <div id="annuel-body"></div>
+  <section class="view" id="v-suivi">
+    <div class="card no-print suivi-bar">
+      <div class="seg big" title="Collaborateurs : qui a participé · Animateurs : qui a animé"><button id="tg-collab" class="on" onclick="setAnnuel('collab')">👥 Collaborateurs</button><button id="tg-cond" onclick="setAnnuel('cond')">🎓 Animateurs</button></div>
+      <div class="selects"><select id="sel-annee" onchange="anAnnee=+this.value;renderSuivi()" title="Année"></select><select id="sel-mois" onchange="setMois(this.value)" title="Année entière ou un mois"></select><select id="sel-filtre" onchange="anFiltre=this.value;renderSuivi()" title="Groupe ou agence"></select></div>
+    </div>
+    <div id="suivi-body"></div>
   </section>
 
   <section class="view" id="v-reglages">
     <div class="card"><h2>👥 Collaborateurs</h2>
-      <div id="roster-ref" class="banner ok" style="display:none">📇 <b>Liste tenue dans le Référentiel CDES.</b> Pour ajouter quelqu'un, noter un départ, changer une agence, un groupe ou un rôle de conducteur : modifie le classeur « Référentiel CDES » (colonne qhp = oui). La liste se met à jour ici à la synchro suivante (10 minutes au plus).</div>
+      <div id="roster-ref" class="banner ok" style="display:none">📇 <b>Liste tenue depuis l'intranet HSE</b> (zone HSE ▸ Collaborateurs : entrées, départs, agence, groupe, animateur). Elle arrive ici à la synchro suivante (10 minutes au plus). Un départ grise la personne (N/A) à partir de son mois de sortie.</div>
+      <div id="roster-etat"></div>
       <div id="roster-ajout">
       <p class="small muted">Ajoute, retire ou supprime une personne. « Départ » conserve l'historique et grise les mois suivants ; « Supprimer » efface la personne.</p>
       <label class="f">Nom (Prénom NOM)</label><input type="text" id="new-name" placeholder="Ex. Jean DUPONT">
@@ -78,7 +103,7 @@
         <div class="grow"><label class="f">Groupe</label><select id="new-name-sec"></select></div>
         <div class="grow" style="max-width:130px"><label class="f">Agence</label><select id="new-name-ag"></select></div>
       </div>
-      <label style="display:flex;align-items:center;gap:7px;font-size:14px;margin-top:8px"><input type="checkbox" id="new-name-cond" style="width:auto"> Conducteur de travaux</label>
+      <label style="display:flex;align-items:center;gap:7px;font-size:14px;margin-top:8px"><input type="checkbox" id="new-name-cond" style="width:auto"> Animateur de QHP (conducteur de travaux)</label>
       <button class="btn btn-primary btn-block" style="margin-top:8px" onclick="addName()">＋ Ajouter</button>
       </div>
       <label class="f" style="margin-top:14px">Filtrer la liste</label><select id="reg-filtre" onchange="renderReglages()"></select>
@@ -147,7 +172,7 @@
         <div style="width:160px"><label class="f">Date *</label><input type="date" id="e-date"></div>
       </div>
       <div class="row">
-        <div class="grow"><label class="f">Animateur du QHP / Mise au travail *</label><input type="text" id="e-anim" list="dl-cond2" placeholder="Qui anime ?"><datalist id="dl-cond2"></datalist></div>
+        <div class="grow"><label class="f">Animateur du QHP / Mise au travail *</label><input type="text" id="e-anim" list="dl-cond2" placeholder="Qui anime ?" onchange="emargAnimateurParticipe()"><datalist id="dl-cond2"></datalist></div>
         <div style="width:160px"><label class="f">Durée du QHP</label><input type="text" id="e-duree" placeholder="15 min"></div>
       </div>
     </div>
@@ -190,7 +215,7 @@
 
 <nav class="tabs no-print">
   <button class="on" data-v="v-accueil" onclick="go('v-accueil')"><span class="ic">🏠</span>Accueil</button>
-  <button data-v="suivi" onclick="goSuivi()"><span class="ic">📊</span>Suivi</button>
+  <button data-v="v-suivi" onclick="go('v-suivi')"><span class="ic">📊</span>Suivi</button>
   <button data-v="v-reglages" onclick="go('v-reglages')"><span class="ic">⚙️</span>Réglages</button>
 </nav>
 
@@ -200,7 +225,7 @@
   <div class="row"><div class="grow"><label class="f">Date *</label><input type="date" id="f-date"></div>
     <div class="grow"><label class="f">Chantier</label><input type="text" id="f-chantier" list="dl-chantiers" placeholder="Nom du chantier" oninput="chantierPickConduc()"><datalist id="dl-chantiers"></datalist></div></div>
   <label class="f">Thème / sujet *</label><input type="text" id="f-theme" placeholder="Ex. Ligne de tir lors du levage">
-  <label class="f">Conducteur / animateur</label><input type="text" id="f-cond" list="dl-conducteurs" placeholder="Qui a animé le QHP ?"><datalist id="dl-conducteurs"></datalist>
+  <label class="f">Animateur <span class="muted" style="font-weight:400">— il compte parmi les participants</span></label><input type="text" id="f-cond" list="dl-conducteurs" placeholder="Qui a animé le QHP ?" onchange="animateurParticipe()"><datalist id="dl-conducteurs"></datalist>
   <label class="f">Remontées terrain / observations</label>
   <textarea id="f-remontees" placeholder="Points remontés par l'équipe pendant le QHP…"></textarea>
 
@@ -223,10 +248,13 @@
   <div class="row" style="margin-top:16px"><button class="btn btn-danger" id="f-del" onclick="deleteFiche()" style="display:none">🗑 Supprimer</button><button class="btn btn-ghost grow" onclick="closeModal()">Annuler</button><button class="btn btn-primary grow" onclick="saveFiche()">Enregistrer</button></div>
 </div></div>
 <div class="modal" id="m-detail"><div class="sheet" id="detail-body"></div></div>
+<div class="modal m-doublon" id="m-doublon"><div class="sheet"><div class="grab"></div><h2>⚠️ Fiche en double ?</h2><div id="dbl-corps" class="banner"></div>
+  <div class="row"><button class="btn btn-ghost grow" onclick="closeModal()">Annuler</button><button class="btn btn-ghost grow" id="dbl-ouvrir">Ouvrir l'existante</button><button class="btn btn-primary grow" id="dbl-garder">Enregistrer quand même</button></div></div></div>
+<div class="popcell" id="popcell" style="display:none"></div>
 <div id="dropov"><div class="dob"><span class="ic">📎</span>Dépose ici le PDF ou la photo<span>elle sera jointe à la fiche QHP</span></div></div>
 <div id="toast"></div>
 
-<script src="js/logo.js?v=2.3"></script>
-<script src="js/qhp.js?v=2.3"></script>
+<script src="js/logo.js?v=3.0"></script>
+<script src="js/qhp.js?v=3.0"></script>
 </body>
 </html>
