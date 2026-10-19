@@ -403,6 +403,42 @@ function oublierSync(){
   conf.webhook='';conf.secret='';try{localStorage.setItem(LS_CONF,JSON.stringify(conf))}catch(e){}
   renderReglages();toast('Paramètres effacés')}
 
+/* ===== V2.3 — un PDF scanné est transformé EN IMAGES dans le navigateur avant la lecture IA.
+   Google refusait certains PDF (« drive.files.create : Internal Error ») et le modèle de vision,
+   le meilleur sur l'écriture manuscrite, ne lit que des images. pdf.js est embarqué (js/lib),
+   jamais chargé depuis un CDN. 2 pages au plus (une fiche d'émargement en fait rarement plus). */
+let pdfjsPret=null;
+function chargerPdfjs(){
+  if(window.pdfjsLib)return Promise.resolve(window.pdfjsLib);
+  if(pdfjsPret)return pdfjsPret;
+  pdfjsPret=new Promise((ok,ko)=>{const sc=document.createElement('script');sc.src='js/lib/pdf.min.js?v=2.3';
+    sc.onload=()=>{try{window.pdfjsLib.GlobalWorkerOptions.workerSrc='js/lib/pdf.worker.min.js';ok(window.pdfjsLib)}catch(e){ko(e)}};sc.onerror=()=>ko(new Error('pdf.js introuvable (js/lib)'));document.head.appendChild(sc)});
+  return pdfjsPret;
+}
+async function pdfEnImages(dataUrl,maxPages){
+  const lib=await chargerPdfjs();
+  const b64=String(dataUrl).split(',')[1]||'';const bin=atob(b64);const buf=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)buf[i]=bin.charCodeAt(i);
+  const pdf=await lib.getDocument({data:buf,isEvalSupported:false}).promise;
+  const out=[];const n=Math.min(pdf.numPages,maxPages||2);
+  for(let i=1;i<=n;i++){
+    const page=await pdf.getPage(i);const v1=page.getViewport({scale:1}),k=Math.min(3,1800/Math.max(v1.width,v1.height)),vp=page.getViewport({scale:k});
+    const c=document.createElement('canvas');c.width=Math.round(vp.width);c.height=Math.round(vp.height);
+    const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);
+    await page.render({canvasContext:x,viewport:vp}).promise;
+    out.push(c.toDataURL('image/jpeg',.85));
+  }
+  try{pdf.destroy()}catch(e){}
+  return out;
+}
+/* la charge envoyée au serveur pour une pièce : une image telle quelle, un PDF converti en images */
+async function chargeLecture(p){
+  const base={secret:conf.secret,action:'lire-fiche',appareil:conf.appareil,nom:p.name,roster:actifs().map(x=>x.name)};
+  if(p.type==='application/pdf'){
+    try{const pages=await pdfEnImages(p.data,2);if(pages.length)return Object.assign(base,{type:'image/jpeg',dataUrl:pages[0],pages:pages.slice(1),origine:'pdf'})}
+    catch(e){}   // pdf.js indisponible ou PDF illisible : on envoie le PDF tel quel, comme avant
+  }
+  return Object.assign(base,{type:p.type,dataUrl:p.data});
+}
 /* ===== Lecture IA de la fiche d'émargement ===== */
 async function lireFicheIA(){
   if(!syncConfigure()){toast('La lecture IA nécessite la synchronisation configurée',true);return}
@@ -412,8 +448,7 @@ async function lireFicheIA(){
   const btn=document.getElementById('f-ia');if(btn){btn.disabled=true;btn.textContent='🤖 Lecture en cours…'}
   iaEtat('run','🤖 <b>Lecture de la fiche en cours…</b> (jusqu\'à une minute, ne ferme pas)');
   try{
-    const j=await syncAppel({secret:conf.secret,action:'lire-fiche',appareil:conf.appareil,
-      nom:p.name,type:p.type,dataUrl:p.data,roster:actifs().map(x=>x.name)},120000);
+    const j=await syncAppel(await chargeLecture(p),120000);
     appliquerExtrait(j.extrait||{});
   }catch(err){iaEtat('err','⚠️ Lecture automatique impossible ('+esc(err.message||'?')+'). La fiche reste jointe : remplis les champs à la main, ou réessaie avec « Lire la fiche automatiquement ».');toast('Lecture impossible : '+(err.message||'?'),true)}
   finally{if(btn){btn.disabled=false;btn.textContent='🤖 Lire la fiche automatiquement'}}}
@@ -482,7 +517,7 @@ async function lancerLectures(){
       try{
         const v=await pdfGet('br_'+b.id);const p=v&&v.items&&v.items[0];
         if(!p)throw new Error('fichier introuvable sur cet appareil');
-        const j=await syncAppel({secret:conf.secret,action:'lire-fiche',appareil:conf.appareil,nom:p.name,type:p.type,dataUrl:p.data,roster:actifs().map(x=>x.name)},120000);
+        const j=await syncAppel(await chargeLecture(p),120000);
         b.extrait=j.extrait||{};b.etat='pret';b.erreur='';
       }catch(e){b.etat='erreur';b.erreur=(e&&e.message)||'erreur'}
       save();renderBrouillons();
