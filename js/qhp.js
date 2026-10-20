@@ -4,7 +4,7 @@
    cases cliquables (a participé / N/A / absent) sans doublon ; l'animateur compte parmi les
    participants ; alerte « fiche en double » (même jour, même animateur) ; mois de départ = N/A ;
    « Animateur » remplace « Conducteur » ; liste des collaborateurs alignée sur le Référentiel. */
-const APP_VERSION_QHP='V3.4.5';   // 20/10/2026 — « Animateurs à corriger » : un nom mal écrit corrigé sur toutes ses fiches en un clic. V3.4.4 : onglet Animateurs : tout collaborateur qui a animé un QHP dans l'année (même sans 🎓), animateurs inconnus signalés. V3.4.3 : téléphone : fiche d'émargement vérifiée, ligne « intervenant extérieur » sur deux lignes. V3.4.3 aussi : un nom avec apostrophe se coche et signe dans l'émargement. V3.4.2 : rythme 4 mois : compté dans le % du mois s'il a fait un QHP (+1), sinon hors %. Reprend la V3.4.1 (menu d'une case court)
+const APP_VERSION_QHP='V3.4.6';   // 20/10/2026 — correcteur : noms des personnes parties (noms écrits sur d’autres fiches), « Laisser tel quel », doublons de la liste signalés et corrigeables. V3.4.5 : « Animateurs à corriger » : un nom mal écrit corrigé sur toutes ses fiches en un clic. V3.4.4 : onglet Animateurs : tout collaborateur qui a animé un QHP dans l'année (même sans 🎓), animateurs inconnus signalés. V3.4.3 : téléphone : fiche d'émargement vérifiée, ligne « intervenant extérieur » sur deux lignes. V3.4.3 aussi : un nom avec apostrophe se coche et signe dans l'émargement. V3.4.2 : rythme 4 mois : compté dans le % du mois s'il a fait un QHP (+1), sinon hors %. Reprend la V3.4.1 (menu d'une case court)
 const LS='qhp_app_v5', LS_CONF='qhp_conf_v5';
 const EPOCH='1970-01-01T00:00:00.000Z';
 function nowISO(){return new Date().toISOString()}
@@ -1262,26 +1262,45 @@ function collabSensibMois(cond,y,i){const k=mkey(y,i),vus={},c=cleNomJs(cond);
 /* V3.4.5 — ANIMATEURS À CORRIGER : texte de la case « Animateur » qui n'est pas exactement un nom de la liste.
    Pour chacun : le nombre de fiches (toutes années), une proposition, et « Corriger » qui réécrit TOUTES ces fiches. */
 function motsAnim(t){return String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z ]+/g,' ').split(' ').filter(Boolean)}
-function suggestionAnimateur(t){
-  const n=nomRoster(t);if(n)return n;
-  const w=motsAnim(t),longs=w.filter(x=>x.length>1),init=w.filter(x=>x.length===1);
-  if(!longs.length||!longs.some(x=>x.length>=4))return '';
-  const cand=state.roster.filter(p=>{const m=motsAnim(p.name);if(!longs.every(x=>m.indexOf(x)>=0))return false;
-    return init.every(i=>m.some(x=>x.charAt(0)===i))});
-  return cand.length===1?cand[0].name:''}
-function animateursACorriger(y){const n={},ex={};state.roster.forEach(p=>ex[p.name]=1);
-  state.qhps.forEach(q=>{const t=String(q.cond||'').trim();if(!t||ex[t])return;
-    const o=n[t]||(n[t]={t,n:0,an:0,dates:[]});o.n++;if(String(q.date||'').slice(0,4)===String(y))o.an++;o.dates.push(frDate(q.date))});
-  return Object.values(n).filter(o=>o.an>0).map(o=>Object.assign(o,{sug:suggestionAnimateur(o.t)})).sort((a,b)=>b.an-a.an||a.t.localeCompare(b.t,'fr'))}
+function inclusDans(t,noms){const w=motsAnim(t),longs=w.filter(x=>x.length>1),init=w.filter(x=>x.length===1);
+  if(!longs.length||!longs.some(x=>x.length>=4))return [];
+  return noms.filter(n=>{if(n===t)return false;const m=motsAnim(n);return longs.every(x=>m.indexOf(x)>=0)&&init.every(i=>m.some(x=>x.charAt(0)===i))})}
+function suggestionAnimateur(t,autres){
+  const n=nomRoster(t);if(n&&n!==t)return n;
+  const d=doublonsListe()[t];if(d)return d;
+  const c=inclusDans(t,state.roster.map(p=>p.name));if(c.length===1)return c[0];
+  if(c.length)return '';
+  const a=inclusDans(t,(autres||[]).filter(x=>motsAnim(x).length>motsAnim(t).length||(motsAnim(x).length===motsAnim(t).length&&x.length>t.length)));
+  return a.length===1?a[0]:''}
+/* V3.4.6 — deux fiches de la liste pour la même personne (« DE COSTA Pedro » et « LONGNOM DE COSTA Pedro », même agence) : { court: long } */
+function doublonsListe(){const r={},noms=state.roster.map(p=>p.name),ag={};state.roster.forEach(p=>ag[p.name]=p.agence||'');
+  noms.forEach(n=>{if(motsAnim(n).filter(x=>x.length>1).length<2)return;
+    const c=inclusDans(n,noms).filter(m=>motsAnim(m).length>motsAnim(n).length&&(!ag[m]||!ag[n]||ag[m]===ag[n]));if(c.length===1)r[n]=c[0]});return r}
+const LS_ANIM_OK='qhp_anim_ok_v1';
+function animOk(){try{return JSON.parse(localStorage.getItem(LS_ANIM_OK)||'{}')}catch(e){return {}}}
+function laisserAnimateur(t){const o=animOk();o[t]=nowISO();try{localStorage.setItem(LS_ANIM_OK,JSON.stringify(o))}catch(e){}renderSuivi();toast('« '+t+' » laissé tel quel')}
+function animateursACorriger(y){const n={},ex={},dbl=doublonsListe(),ok=animOk();state.roster.forEach(p=>ex[p.name]=1);
+  state.qhps.forEach(q=>{const t=String(q.cond||'').trim();if(!t||(ex[t]&&!dbl[t])||ok[t])return;
+    const o=n[t]||(n[t]={t,n:0,an:0,dates:[],doublon:!!dbl[t]});o.n++;if(String(q.date||'').slice(0,4)===String(y))o.an++;o.dates.push(frDate(q.date))});
+  const textes=Object.keys(n).filter(t=>!ex[t]);
+  return Object.values(n).filter(o=>o.an>0).map(o=>Object.assign(o,{sug:suggestionAnimateur(o.t,textes)})).sort((a,b)=>b.an-a.an||a.t.localeCompare(b.t,'fr'))}
 function animateursInconnus(y){return animateursACorriger(y).filter(o=>!o.sug).map(o=>({t:o.t,n:o.an}))}
-function renderCorrAnim(y){const l=animateursACorriger(y);if(!l.length)return '';
-  const opts=[...state.roster].sort((a,b)=>a.name.localeCompare(b.name,'fr'));
-  return '<div class="card corr-anim"><h2>✏️ Animateurs à corriger ('+l.length+')</h2>'
-    +'<p class="hint">Le nom écrit dans la case « Animateur » de ces fiches n’est pas exactement celui de la liste. Choisis la bonne personne puis « Corriger » : <b>toutes</b> les fiches qui portent ce texte sont corrigées et synchronisées (l’intranet suit à sa prochaine synchro). Si la personne n’est pas dans la liste, ajoute-la d’abord dans l’intranet (Entrées / départs, case « Suivi dans les QHP »).</p>'
-    +l.map((o,i)=>'<div class="ca-l"><div class="ca-t"><b>'+esc(o.t)+'</b><span class="muted"> · '+o.n+' fiche'+(o.n>1?'s':'')+' ('+esc(o.dates.slice(0,4).join(', '))+(o.dates.length>4?'…':'')+')</span></div>'
-      +'<select class="ca-s" id="ca-s-'+i+'"><option value="">— choisir la personne —</option>'+opts.map(p=>'<option'+(p.name===o.sug?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select>'
+function renderCorrAnim(y){const l=animateursACorriger(y),dbl=doublonsListe();if(!l.length&&!Object.keys(dbl).length)return '';
+  const opts=[...state.roster].sort((a,b)=>a.name.localeCompare(b.name,'fr')),ex={};state.roster.forEach(p=>ex[p.name]=1);
+  const autres=[...new Set(state.qhps.map(q=>String(q.cond||'').trim()).filter(t=>t&&!ex[t]))].sort((a,b)=>a.localeCompare(b,'fr'));
+  let h='<div class="card corr-anim"><h2>✏️ Animateurs à corriger ('+l.length+')</h2>'
+    +'<p class="hint">Le nom écrit dans la case « Animateur » de ces fiches n’est pas exactement celui de la liste. Choisis la bonne personne puis « Corriger » : <b>toutes</b> les fiches qui portent ce texte sont corrigées et synchronisées (l’intranet suit dans les 15 minutes). Une personne partie de l’entreprise n’est plus dans la liste : choisis son nom le plus complet parmi « noms écrits sur d’autres fiches », ou « Laisser tel quel ».</p>';
+  const dk=Object.keys(dbl);
+  if(dk.length)h+='<div class="ca-dbl">⚠️ <b>La liste des collaborateurs contient '+(dk.length>1?dk.length+' doublons probables':'un doublon probable')+'</b> : '+dk.map(k=>'« '+esc(k)+' » et « '+esc(dbl[k])+' »').join(' ; ')
+    +'. Corrige leurs fiches ci-dessous, puis supprime le nom en trop dans l’intranet (zone HSE ▸ Entrées / départs ▸ ✏️ ▸ 🗑).</div>';
+  h+=l.map((o,i)=>'<div class="ca-l"><div class="ca-t"><b>'+esc(o.t)+'</b>'+(o.doublon?' <span class="r4">doublon de la liste</span>':'')+'<span class="muted"> · '+o.n+' fiche'+(o.n>1?'s':'')+' ('+esc(o.dates.slice(0,4).join(', '))+(o.dates.length>4?'…':'')+')</span></div>'
+      +'<select class="ca-s" id="ca-s-'+i+'"><option value="">— choisir la personne —</option><optgroup label="Liste des collaborateurs">'
+      +opts.filter(p=>p.name!==o.t).map(p=>'<option'+(p.name===o.sug?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</optgroup>'
+      +(autres.filter(t=>t!==o.t).length?'<optgroup label="Noms écrits sur d’autres fiches (hors liste)">'+autres.filter(t=>t!==o.t).map(t=>'<option'+(t===o.sug?' selected':'')+'>'+esc(t)+'</option>').join('')+'</optgroup>':'')+'</select>'
       +'<button class="btn btn-primary btn-sm" data-t="'+esc(o.t)+'" data-i="'+i+'" onclick="corrigerAnimateur(this.dataset.t,document.getElementById(\'ca-s-\'+this.dataset.i).value)">Corriger</button>'
-      +(o.sug?'<span class="ca-sug">proposition : '+esc(o.sug)+'</span>':'<span class="ca-sug ko">aucune proposition sûre</span>')+'</div>').join('')+'</div>'}
+      +'<button class="btn btn-ghost btn-sm" data-t="'+esc(o.t)+'" onclick="laisserAnimateur(this.dataset.t)" title="Nom juste (personne partie, extérieur) : ne plus le proposer sur cet appareil">Laisser tel quel</button>'
+      +(o.sug?'<span class="ca-sug">proposition : '+esc(o.sug)+'</span>':'<span class="ca-sug ko">aucune proposition sûre</span>')+'</div>').join('');
+  return h+'</div>'}
 function corrigerAnimateur(t,nom){
   if(!nom){toast('Choisis la personne dans la liste',true);return}
   const l=state.qhps.filter(q=>String(q.cond||'').trim()===t);if(!l.length)return;
