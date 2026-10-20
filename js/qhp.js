@@ -4,7 +4,7 @@
    cases cliquables (a participé / N/A / absent) sans doublon ; l'animateur compte parmi les
    participants ; alerte « fiche en double » (même jour, même animateur) ; mois de départ = N/A ;
    « Animateur » remplace « Conducteur » ; liste des collaborateurs alignée sur le Référentiel. */
-const APP_VERSION_QHP='V3.3.2';   // 20/10/2026 — historique : bilan par origine (importées, scannées, saisies, signées) et recherche des doublons probables (même jour + même animateur / chantier / participants), suppression d'un clic
+const APP_VERSION_QHP='V3.3.3';   // 20/10/2026 — une fiche supprimée pendant une synchro (envoi des scans en cours) ne revient plus : la réponse du serveur est fusionnée avec ce qui a changé sur l'appareil entre-temps, et la synchro est relancée
 const LS='qhp_app_v5', LS_CONF='qhp_conf_v5';
 const EPOCH='1970-01-01T00:00:00.000Z';
 function nowISO(){return new Date().toISOString()}
@@ -162,6 +162,7 @@ function renderDoublons(d){const box=document.getElementById('doublons-box');if(
 function supprimerDoublon(id){const q=state.qhps.find(x=>x.id===id);if(!q)return;
   if(!confirm('Supprimer la fiche du '+frDate(jourQ(q.date))+' — '+(q.chantier||'?')+' ('+(q.cond||'sans animateur')+', '+nbParticipants(q)+' participants) ?'))return;
   pdfDel(id);pdfDel('sig_'+id);state.tomb.qhps[id]=nowISO();state.qhps=state.qhps.filter(x=>x.id!==id);
+  syncFile=syncFile.filter(x=>x!==id);garderFile();
   save();renderFiches();renderDernieres();toast('Fiche supprimée');syncAuto()}
 function pasDoublon(k){const ok=dblOk();ok[k]=nowISO();try{localStorage.setItem(CLE_DBL_OK,JSON.stringify(ok))}catch(e){}renderBilanFiches()}
 function renderFiches(){renderBilanFiches();const box=document.getElementById('fiches-list');const list=[...state.qhps].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
@@ -328,7 +329,7 @@ async function saveFiche(force){const date=document.getElementById('f-date').val
 function majChantier(q){if(!q.chantier)return;const ex=state.chantiers.find(c=>c.nom.toLowerCase()===q.chantier.toLowerCase());
   if(ex){ex.nom=q.chantier;if(q.cond)ex.cond=q.cond;ex.maj=nowISO()}else state.chantiers.push({id:uid(),nom:q.chantier,cond:q.cond||'',maj:nowISO()})}
 function deleteFiche(){if(!editId)return;if(!confirm('Supprimer cette fiche QHP ?'))return;pdfDel(editId);pdfDel('sig_'+editId);
-  state.tomb.qhps[editId]=nowISO();state.qhps=state.qhps.filter(x=>x.id!==editId);save();closeModal();renderFiches();toast('Fiche supprimée');syncAuto()}
+  state.tomb.qhps[editId]=nowISO();state.qhps=state.qhps.filter(x=>x.id!==editId);syncFile=syncFile.filter(x=>x!==editId);garderFile();save();closeModal();renderFiches();toast('Fiche supprimée');syncAuto()}
 async function openDetail(id){const q=state.qhps.find(x=>x.id===id);if(!q)return;
   const pres=state.roster.filter(p=>q.present&&q.present[p.name]);
   const g=grouper(pres);let byg='';Object.keys(g).forEach(s=>{byg+=`<div style="margin-top:6px"><b class="small" style="color:var(--marine)">${esc(s)}</b><div>${g[s].map(p=>'<span class="pill ok" style="margin:2px">'+esc(p.name)+'</span>').join(' ')}</div></div>`});
@@ -419,14 +420,31 @@ async function syncAppel(payload,ms){
     if(e instanceof TypeError)throw new Error("Impossible de joindre l'adresse. "+(verifierUrl(conf.webhook)||'Vérifie ta connexion internet, et que le déploiement est en « Qui a accès : Tout le monde »'));
     throw e}
   finally{clearTimeout(t)}}
-function appliquerSync(d){
-  if(Array.isArray(d.qhps))state.qhps=d.qhps.map(q=>Object.assign({},q,{date:jourQ(q.date)}));   // V3.3.1
+/* V3.3.3 — la réponse d'une synchro reflète l'appareil AU DÉPART de la synchro. Ce qui a changé ici
+   pendant qu'elle tournait (fiche supprimée, ajoutée, modifiée — par exemple pendant l'envoi des scans)
+   ne doit pas être écrasé : on garde les pierres tombales locales plus récentes, les fiches locales
+   plus récentes que celles du serveur, et celles créées depuis le départ. Ces changements partent
+   à la synchro suivante, relancée automatiquement. */
+function fusionReponse(d,t0){
+  const tombL=state.tomb.qhps||{},tomb=Object.assign({},d.tombQhps||{});
+  Object.keys(tombL).forEach(k=>{if(!tomb[k]||String(tombL[k])>String(tomb[k]))tomb[k]=tombL[k]});
+  const loc={};(state.qhps||[]).forEach(q=>loc[q.id]=q);
+  const vus={},out=[];
+  d.qhps.forEach(q0=>{const q=Object.assign({},q0,{date:jourQ(q0.date)}),l=loc[q.id];vus[q.id]=1;
+    const v=(l&&String(l.maj||'')>String(q.maj||''))?l:q;
+    if(tomb[v.id]&&String(tomb[v.id])>=String(v.maj||''))return;   // supprimée (ici ou ailleurs) après sa dernière modification
+    out.push(v)});
+  (state.qhps||[]).forEach(l=>{if(vus[l.id])return;
+    if(String(l.maj||'')>=String(t0||'')&&!(tomb[l.id]&&String(tomb[l.id])>=String(l.maj||'')))out.push(l)});   // créée pendant la synchro
+  state.tomb.qhps=tomb;
+  return out}
+function appliquerSync(d,t0){
+  if(Array.isArray(d.qhps))state.qhps=fusionReponse(d,t0);   // V3.3.3 (dates réparées dans fusionReponse, V3.3.1)
   if(Array.isArray(d.roster))state.roster=d.roster.map(p=>{const o=Object.assign({dateAjout:'',dateDepart:'',agence:'IDF'},p);o.dateAjout=jourQ(o.dateAjout);o.dateDepart=jourQ(o.dateDepart);return o});
   state.rosterSource=d.rosterSource==='referentiel'?'referentiel':'appli';   // V2.1 : liste tenue dans le Référentiel CDES
   if(d.referentiel&&typeof d.referentiel==='object')state.referentiel=d.referentiel;   // V3 : état du branchement, en clair
   if(Array.isArray(d.chantiers))state.chantiers=d.chantiers;
   if(Array.isArray(d.secteurs)&&d.secteurs.length)state.secteurs=d.secteurs;
-  if(d.tombQhps)state.tomb.qhps=d.tombQhps;
   if(d.tombRoster)state.tomb.roster=d.tombRoster;
   if(d.gestion)state.gestion=d.gestion; if(d.gestionMaj)state.majDico.gestion=d.gestionMaj;
   if(d.exclus)state.exclus=d.exclus;    if(d.exclusMaj)state.majDico.exclus=d.exclusMaj;
@@ -437,13 +455,16 @@ function appliquerSync(d){
 async function syncNow(manuel){
   if(!syncConfigure()){if(manuel)toast('Renseigne d\'abord l\'adresse du webhook',true);return false}
   if(syncEnCours){if(manuel)toast('Synchro déjà en cours…');return false}
-  syncEnCours=true;syncEtat('⏳ Synchronisation…','muted');
+  syncEnCours=true;syncRelance=false;syncEtat('⏳ Synchronisation…','muted');
+  const t0=nowISO();
   try{
     const j=await syncAppel(syncPayload());
-    appliquerSync(j.data||{});
-    const reste=[];
-    for(const id of syncFile){try{await pousserPieces(id)}catch(e){reste.push(id)}}
-    syncFile=reste;garderFile();
+    appliquerSync(j.data||{},t0);
+    renderFiches();renderDernieres();   // V3.3.3 : l'écran suit tout de suite, avant l'envoi des scans
+    const aEnvoyer=syncFile.slice(),reste=[];
+    for(const id of aEnvoyer){if(!state.qhps.some(q=>q.id===id))continue;   // fiche supprimée entre-temps : rien à envoyer
+      try{await pousserPieces(id)}catch(e){reste.push(id)}}
+    syncFile=reste.concat(syncFile.filter(id=>!aEnvoyer.includes(id)));garderFile();   // V3.3.3 : garde ce qui a été ajouté pendant l'envoi
     conf.dernierSync=nowISO();try{localStorage.setItem(LS_CONF,JSON.stringify(conf))}catch(e){}
     renderFiches();renderDernieres();
     if(document.getElementById('v-suivi').classList.contains('active'))renderSuivi();
@@ -455,10 +476,12 @@ async function syncNow(manuel){
     syncEtat('⚠️ '+(e.message||'échec'),'err-txt');
     if(manuel)toast('Échec : '+(e.message||'?'),true);
     return false}
-  finally{syncEnCours=false}}
+  finally{syncEnCours=false;if(syncRelance){syncRelance=false;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncNow(false),1500)}}}
+let syncRelance=false;
 function syncAuto(idFiche){
   if(idFiche&&syncFile.indexOf(idFiche)<0){syncFile.push(idFiche);garderFile()}
   if(!syncConfigure()||conf.autoSync===false)return;
+  if(syncEnCours){syncRelance=true;return}   // V3.3.3 : une synchro tourne → on en relance une à la fin
   clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncNow(false),2500)}
 async function pousserPieces(qhpId){
   const items=await piecesGet(qhpId);
