@@ -1,6 +1,6 @@
 # Suivi des QHP — CDES
 
-Outil du service HSE : fiches de Quart d'Heure Prévention (saisie, photo ou PDF de la fiche signée, lecture automatique), fiche d'émargement signable au doigt pour les animateurs (conducteurs de travaux), suivi annuel de participation (un mois au clic), participants ajoutés d'une touche. V3.3 du 20/10/2026 (un seul bandeau de scan, une ou plusieurs fiches : certitude, Vérifier ou Envoyer ; import de lots de fiches transcrites).
+Outil du service HSE : fiches de Quart d'Heure Prévention (saisie, photo ou PDF de la fiche signée, lecture automatique), fiche d'émargement signable au doigt pour les animateurs (conducteurs de travaux), suivi annuel de participation (un mois au clic), participants ajoutés d'une touche. V3.3.2 du 20/10/2026 (doublons probables dans l'historique ; dates des fiches réparées, filtre par animateur ; un seul bandeau de scan, une ou plusieurs fiches : certitude, Vérifier ou Envoyer ; import de lots de fiches transcrites).
 
 ## Organisation des fichiers
 

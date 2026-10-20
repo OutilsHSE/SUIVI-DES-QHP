@@ -4,7 +4,7 @@
    cases cliquables (a participé / N/A / absent) sans doublon ; l'animateur compte parmi les
    participants ; alerte « fiche en double » (même jour, même animateur) ; mois de départ = N/A ;
    « Animateur » remplace « Conducteur » ; liste des collaborateurs alignée sur le Référentiel. */
-const APP_VERSION_QHP='V3.3';   // 20/10/2026 — un seul bandeau « Je scanne une ou plusieurs fiches » : toute fiche scannée passe par la liste (certitude, Vérifier, Envoyer)
+const APP_VERSION_QHP='V3.3.2';   // 20/10/2026 — historique : bilan par origine (importées, scannées, saisies, signées) et recherche des doublons probables (même jour + même animateur / chantier / participants), suppression d'un clic
 const LS='qhp_app_v5', LS_CONF='qhp_conf_v5';
 const EPOCH='1970-01-01T00:00:00.000Z';
 function nowISO(){return new Date().toISOString()}
@@ -25,6 +25,16 @@ function uid(){return 'q'+Date.now().toString(36)+Math.random().toString(36).sli
 function toast(m,e){const t=document.getElementById('toast');t.textContent=m;t.className=(e?'err ':'')+'show';clearTimeout(t._t);t._t=setTimeout(()=>t.className='',2600)}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function frDate(iso){const d=new Date(iso+'T00:00');if(isNaN(d))return iso;return d.getDate()+' '+MOIS_S[d.getMonth()]+' '+d.getFullYear()}
+/* V3.3.1 — une date de fiche, quelle que soit sa forme (texte, instant ISO, ISO entre guillemets laissé
+   par l'ancien serveur, jj/mm/aaaa), en « aaaa-mm-jj » lu à l'heure de Paris. */
+function jourQ(v){if(v===null||v===undefined)return '';let s=String(v).trim().replace(/^'/,'');
+  if(s.length>1&&s[0]==='"'&&s[s.length-1]==='"')s=s.slice(1,-1);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+  const m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);if(m)return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+  if(/^\d{4}-\d{2}-\d{2}T/.test(s)||/GMT|UTC/.test(s)){const d=new Date(s);if(!isNaN(d)){try{return new Intl.DateTimeFormat('fr-CA',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit'}).format(d)}catch(e){return d.toISOString().slice(0,10)}}}
+  return s.slice(0,10)}
+function reparerDates(){(state.qhps||[]).forEach(q=>{const d=jourQ(q.date);if(d!==q.date)q.date=d});
+  (state.roster||[]).forEach(p=>{p.dateAjout=jourQ(p.dateAjout);p.dateDepart=jourQ(p.dateDepart)})}
 function mkey(y,i){return y+'-'+String(i+1).padStart(2,'0')}
 function load(){try{const r=localStorage.getItem(LS);if(r){const s=JSON.parse(r);if(s&&Array.isArray(s.roster))state=Object.assign(state,s)}}catch(e){}
   if(!state.roster.length&&SEED){state.secteurs=SEED.secteurs.slice();state.roster=SEED.roster.map(p=>Object.assign({},p));state.agences=SEED.agences.slice()}
@@ -34,6 +44,7 @@ function load(){try{const r=localStorage.getItem(LS);if(r){const s=JSON.parse(r)
   if(!state.gestion)state.gestion={}; if(!state.exclus)state.exclus={};
   state.roster.forEach(p=>{if(p.dateAjout===undefined)p.dateAjout='';if(p.dateDepart===undefined)p.dateDepart='';if(!p.agence)p.agence='IDF'});
   if(!state.tomb)state.tomb={qhps:{},roster:{},chantiers:{},secteurs:{}};
+  reparerDates();   // V3.3.1 : répare les dates déjà abîmées sur cet appareil
   ['qhps','roster','chantiers','secteurs'].forEach(k=>{if(!state.tomb[k])state.tomb[k]={}});
   if(!state.majDico)state.majDico={gestion:{},exclus:{},conf:{}};
   ['gestion','exclus','conf'].forEach(k=>{if(!state.majDico[k])state.majDico[k]={}});
@@ -87,9 +98,75 @@ function iaEtat(genre,txt){const b=document.getElementById('f-ia-etat');if(!b)re
 function scanFiche(files){return deposerPlusieurs(files)}
 
 /* ===== Fiches ===== */
-function renderFiches(){const box=document.getElementById('fiches-list');const list=[...state.qhps].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+/* ===== V3.3.2 — BILAN DE L'HISTORIQUE ET DOUBLONS PROBABLES =====
+   Une fiche saisie à la main puis retrouvée dans un lot (ou scannée deux fois) n'est pas
+   toujours repérée à l'import : animateur écrit autrement, pas d'animateur, date décalée d'un jour.
+   On compare donc toutes les fiches deux à deux : même jour (ou un jour d'écart) ET même
+   animateur, même chantier ou au moins la moitié des participants en commun. Rien n'est
+   supprimé sans un clic ; « deux QHP différents » range la paire pour ne plus la proposer. */
+const CLE_DBL_OK='qhp_dbl_ok_v1';
+let dblOuvert=false;
+function origineQ(q){const s=q.source||'';return s==='import'?'import':s==='scan'?'scan':s==='emargement'?'emarg':'saisie'}
+const ORIG_LIB={import:'importées (lots)',scan:'scannées',emarg:'signées sur téléphone',saisie:'saisies dans l’appli (à la main ou scan vérifié)'};
+const ORIG_UN={import:'importée (lot)',scan:'scannée',emarg:'signée sur téléphone',saisie:'saisie dans l’appli'};
+function cleTexte(t){return String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()}
+function memeChantier(a,b){const x=cleTexte(a),y=cleTexte(b);if(!x||!y)return false;if(x===y||x.includes(y)||y.includes(x))return true;
+  const my=new Set(y.split(' ').filter(w=>w.length>=4&&!['chantier','bateau','agence','canal'].includes(w)));return x.split(' ').some(w=>my.has(w))}
+const MOTS_THEME_VIDES=new Set(['flash','flashs','sante','securite','regle','regles','sauve','sauvent','theme','themes','general','generale','rappel','point','joint','jointe','atelier','chantier','chantiers','retex','travail','prevention','quart','heure','accident','accidents','bateau','animation','sensibilisation']);
+function motsTheme(t){return new Set(cleTexte(t).split(' ').filter(w=>w.length>=5&&!/^\d+$/.test(w)&&!MOTS_THEME_VIDES.has(w)))}
+/* strict (deux fiches transcrites) : il faut un vrai mot commun ; souple (saisie à la main contre fiche
+   transcrite, libellés différents) : un thème trop vague ne permet pas de conclure → « proches ». */
+function themesProches(a,b,strict){const x=motsTheme(a),y=motsTheme(b);if(!x.size||!y.size)return strict?cleTexte(a)===cleTexte(b):true;
+  return [...x].some(w=>y.has(w))}
+function presentsQ(q){return Object.keys(q.present||{}).filter(n=>q.present[n])}
+function recouvrement(a,b){const an=new Set([cleNomJs(a.cond),cleNomJs(b.cond)].filter(Boolean)),hors=n=>!an.has(cleNomJs(n));   // l'animateur ne compte pas : il est forcément des deux
+  const A=presentsQ(a).filter(hors),B=new Set(presentsQ(b).filter(hors));if(!A.length||!B.size)return 0;return A.filter(n=>B.has(n)).length/Math.min(A.length,B.size)}
+function richesse(q){return nbParticipants(q)+(nbPieces(q)?3:0)+(q.remontees?1:0)+(q.cond?1:0)}
+function dblOk(){try{return JSON.parse(localStorage.getItem(CLE_DBL_OK)||'{}')}catch(e){return {}}}
+function doublonsProbables(){
+  const ok=dblOk(),L=state.qhps.filter(q=>/^\d{4}-\d{2}-\d{2}$/.test(jourQ(q.date))),out=[];
+  for(let i=0;i<L.length;i++)for(let j=i+1;j<L.length;j++){const a=L[i],b=L[j];
+    const ecart=Math.abs((new Date(jourQ(a.date)+'T12:00')-new Date(jourQ(b.date)+'T12:00'))/864e5);if(ecart>1)continue;
+    const k=[a.id,b.id].sort().join('|');if(ok[k])continue;
+    const anim=!!cleNomJs(a.cond)&&cleNomJs(a.cond)===cleNomJs(b.cond),ch=memeChantier(a.chantier,b.chantier),rec=recouvrement(a,b);
+    const differents=!!(a.chantier&&b.chantier)&&!ch&&rec<0.3;   // deux chantiers distincts, équipes distinctes
+    const deuxImports=a.source==='import'&&b.source==='import';
+    const th=themesProches(a.theme,b.theme,deuxImports);
+    if(!th&&deuxImports)continue;     // deux fiches transcrites, sujets différents : deux QHP (ex. 2 flashs le même jour)
+    let fort=ecart===0?((anim&&(ch||rec>=0.5))||(ch&&rec>=0.5)||rec>=0.8):(anim&&ch&&rec>=0.5);
+    let moyen=!fort&&(ecart===0?((anim&&!differents)||(ch&&rec>=0.3)):(ch&&rec>=0.5));
+    if(fort&&!th){fort=false;moyen=true}                          // sujets différents : seulement « possible »
+    if(!fort&&!moyen)continue;
+    const raisons=[ecart?'un jour d’écart':'même jour'];if(!th)raisons.push('sujets différents');if(anim)raisons.push('même animateur');if(ch)raisons.push('même chantier');if(rec>0)raisons.push(Math.round(rec*100)+' % des participants en commun');
+    out.push({a,b,k,fort,raisons})}
+  return out.sort((x,y)=>(y.fort-x.fort)||jourQ(x.a.date).localeCompare(jourQ(y.a.date)))}
+function renderBilanFiches(){const box=document.getElementById('fiches-bilan');if(!box)return;
+  const n={import:0,scan:0,emarg:0,saisie:0};state.qhps.forEach(q=>n[origineQ(q)]++);
+  const d=doublonsProbables(),fo=d.filter(x=>x.fort).length;
+  box.innerHTML='<div class="fb"><b>'+state.qhps.length+' fiches</b> : '+Object.keys(n).filter(k=>n[k]).map(k=>'<span class="lot-pill">'+n[k]+' '+(n[k]>1?ORIG_LIB[k]:ORIG_UN[k])+'</span>').join('')
+    +'<div class="row"><button class="btn '+(d.length?'btn-primary':'btn-ghost')+' btn-sm" onclick="basculerDoublons()">🔍 '+(d.length?(d.length+' doublon'+(d.length>1?'s':'')+' probable'+(d.length>1?'s':'')+(fo&&fo<d.length?' (dont '+fo+' très probable'+(fo>1?'s':'')+')':'')):'Aucun doublon probable')+(dblOuvert?' — masquer':'')+'</button></div></div>';
+  renderDoublons(d)}
+function basculerDoublons(){dblOuvert=!dblOuvert;renderBilanFiches()}
+function carteDbl(q,conseil,k){const nb=nbParticipants(q);
+  return '<div class="dbl-c'+(conseil?' conseil':'')+'">'+(conseil?'<div class="tag">✓ la plus complète — à garder</div>':'')
+    +'<b>'+esc(frDate(jourQ(q.date)))+'</b> · '+esc(q.chantier||'chantier ?')+'<br>🎓 '+esc(q.cond||'sans animateur')+' · '+nb+' participant'+(nb>1?'s':'')+(nbPieces(q)?' · 📎':'')+(q.remontees?' · 💬':'')
+    +'<br><span class="muted">'+esc(q.theme||'(sans thème)')+'</span><br><span class="src">'+esc(ORIG_UN[origineQ(q)])+'</span>'
+    +'<div class="row"><button class="btn btn-ghost btn-sm" data-id="'+esc(q.id)+'" onclick="openDetail(this.dataset.id)">Ouvrir</button>'
+    +'<button class="btn btn-ghost btn-sm" data-id="'+esc(q.id)+'" onclick="supprimerDoublon(this.dataset.id)">🗑 Supprimer celle-ci</button></div></div>'}
+function renderDoublons(d){const box=document.getElementById('doublons-box');if(!box)return;
+  if(!dblOuvert||!d.length){box.innerHTML='';return}
+  box.innerHTML='<p class="hint">Chaque paire : deux fiches qui se ressemblent. Garde la plus complète (encadrée en vert), supprime l’autre — ou indique que ce sont deux QHP différents.</p>'
+    +d.map(x=>{const ka=richesse(x.a)>=richesse(x.b);
+      return '<div class="dbl-p"><div class="why">'+(x.fort?'Très probable':'Possible')+' · '+esc(x.raisons.join(' · '))+'</div><div class="dbl-g">'+carteDbl(x.a,ka)+carteDbl(x.b,!ka)+'</div>'
+        +'<div class="row"><button class="btn btn-ghost btn-sm" data-k="'+esc(x.k)+'" onclick="pasDoublon(this.dataset.k)">✓ Ce sont deux QHP différents</button></div></div>'}).join('')}
+function supprimerDoublon(id){const q=state.qhps.find(x=>x.id===id);if(!q)return;
+  if(!confirm('Supprimer la fiche du '+frDate(jourQ(q.date))+' — '+(q.chantier||'?')+' ('+(q.cond||'sans animateur')+', '+nbParticipants(q)+' participants) ?'))return;
+  pdfDel(id);pdfDel('sig_'+id);state.tomb.qhps[id]=nowISO();state.qhps=state.qhps.filter(x=>x.id!==id);
+  save();renderFiches();renderDernieres();toast('Fiche supprimée');syncAuto()}
+function pasDoublon(k){const ok=dblOk();ok[k]=nowISO();try{localStorage.setItem(CLE_DBL_OK,JSON.stringify(ok))}catch(e){}renderBilanFiches()}
+function renderFiches(){renderBilanFiches();const box=document.getElementById('fiches-list');const list=[...state.qhps].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   if(!list.length){box.innerHTML='<div class="empty"><div class="big">📋</div>Aucune fiche QHP pour l\'instant.<br>Enregistre ton premier QHP depuis l\'onglet « Accueil ».</div>';return}
-  box.innerHTML=list.map(q=>{const d=new Date((q.date||'')+'T00:00');const nb=Object.values(q.present||{}).filter(Boolean).length;
+  box.innerHTML=list.map(q=>{const d=new Date(jourQ(q.date)+'T00:00');const nb=Object.values(q.present||{}).filter(Boolean).length;
     return `<div class="qhp" onclick="openDetail('${q.id}')"><div class="d"><b>${isNaN(d)?'?':d.getDate()}</b><span>${isNaN(d)?'':MOIS_S[d.getMonth()].replace('.','')}</span></div><div class="i"><div class="t">${esc(q.theme||'(sans thème)')}</div><div class="s">${esc(q.chantier||'—')}${q.cond?' · '+esc(q.cond):''} · ${nb} participant${nb>1?'s':''}${nbPieces(q)?' · 📎'+(nbPieces(q)>1?nbPieces(q):''):''}${q.emarg?' · ✍️':''}${q.remontees?' · 💬':''}</div></div><div>›</div></div>`}).join('')}
 async function openFiche(id){editId=id||null;brouillonOuvert=null;certitudesFiche={};lusFiche={};const q=id?state.qhps.find(x=>x.id===id):null;iaEtat('','');
   piecesPending=id?await piecesGetOuTelecharger(id):[];
@@ -283,6 +360,16 @@ document.querySelectorAll('.modal').forEach(m=>m.addEventListener('mousedown',e=
    Tant qu'aucune adresse webhook n'est renseignée, ce module est inerte.
    ============================================================================ */
 let syncEnCours=false, syncTimer=null, syncFile=[];
+/* V3.3.1 — la file des scans à envoyer survit à la fermeture de la page */
+const LS_FILE='qhp_envois_v1';
+try{const f=JSON.parse(localStorage.getItem(LS_FILE)||'[]');if(Array.isArray(f))syncFile=f}catch(e){}
+function garderFile(){try{localStorage.setItem(LS_FILE,JSON.stringify(syncFile))}catch(e){}}
+/* Reprise : un scan importé ou scanné ces 7 derniers jours, resté sur l'appareil sans avoir été envoyé
+   (page fermée pendant l'envoi, avant la V3.3.1), est remis dans la file. */
+async function repriseEnvois(){try{const lim=new Date(Date.now()-7*864e5).toISOString();let n=0;
+  for(const q of state.qhps){if(!(q.source==='import'||q.source==='scan')||String(q.maj||'')<lim||!nbPieces(q)||syncFile.includes(q.id))continue;
+    const it=await piecesGet(q.id);if(it.length&&it.some(p=>!p.driveId)){syncFile.push(q.id);n++}}
+  if(n){garderFile();syncAuto()}return n}catch(e){return 0}}
 function syncConfigure(){return !!conf.webhook}
 function syncEtat(txt,cls){const el=document.getElementById('sync-etat');if(el)el.innerHTML='<span class="'+(cls||'')+'">'+esc(txt)+'</span>'}
 function dicoPayload(dico,majs){
@@ -333,8 +420,8 @@ async function syncAppel(payload,ms){
     throw e}
   finally{clearTimeout(t)}}
 function appliquerSync(d){
-  if(Array.isArray(d.qhps))state.qhps=d.qhps;
-  if(Array.isArray(d.roster))state.roster=d.roster.map(p=>Object.assign({dateAjout:'',dateDepart:'',agence:'IDF'},p));
+  if(Array.isArray(d.qhps))state.qhps=d.qhps.map(q=>Object.assign({},q,{date:jourQ(q.date)}));   // V3.3.1
+  if(Array.isArray(d.roster))state.roster=d.roster.map(p=>{const o=Object.assign({dateAjout:'',dateDepart:'',agence:'IDF'},p);o.dateAjout=jourQ(o.dateAjout);o.dateDepart=jourQ(o.dateDepart);return o});
   state.rosterSource=d.rosterSource==='referentiel'?'referentiel':'appli';   // V2.1 : liste tenue dans le Référentiel CDES
   if(d.referentiel&&typeof d.referentiel==='object')state.referentiel=d.referentiel;   // V3 : état du branchement, en clair
   if(Array.isArray(d.chantiers))state.chantiers=d.chantiers;
@@ -356,7 +443,7 @@ async function syncNow(manuel){
     appliquerSync(j.data||{});
     const reste=[];
     for(const id of syncFile){try{await pousserPieces(id)}catch(e){reste.push(id)}}
-    syncFile=reste;
+    syncFile=reste;garderFile();
     conf.dernierSync=nowISO();try{localStorage.setItem(LS_CONF,JSON.stringify(conf))}catch(e){}
     renderFiches();renderDernieres();
     if(document.getElementById('v-suivi').classList.contains('active'))renderSuivi();
@@ -370,7 +457,7 @@ async function syncNow(manuel){
     return false}
   finally{syncEnCours=false}}
 function syncAuto(idFiche){
-  if(idFiche&&syncFile.indexOf(idFiche)<0)syncFile.push(idFiche);
+  if(idFiche&&syncFile.indexOf(idFiche)<0){syncFile.push(idFiche);garderFile()}
   if(!syncConfigure()||conf.autoSync===false)return;
   clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncNow(false),2500)}
 async function pousserPieces(qhpId){
@@ -722,6 +809,8 @@ function animateurLot(f){const r=f.animateur?resoudreNom(f.animateur):'';return 
 function statutFicheLot(f){
   if(!/^\d{4}-\d{2}-\d{2}$/.test(f.date||''))return 'sansdate';
   if(state.qhps.some(q=>q.lotRef&&q.lotRef===f.ref))return 'deja';
+  // V3.3.1 : le serveur ne garde pas lotRef → même date, même thème, même chantier, source import = déjà importée
+  if(state.qhps.some(q=>q.source==='import'&&jourQ(q.date)===f.date&&String(q.theme||'').trim()===String(f.theme||'(thème non lu)').trim()&&String(q.chantier||'').trim()===String(f.chantier||'').trim()))return 'deja';
   const d=doublonFiche(f.date,animateurLot(f),null);if(d)return 'doublon';
   return 'ok'}
 function renderLot(){
@@ -794,7 +883,7 @@ async function importerLot(){
       pieces:[],hasPdf:false,pdfName:'',maj:t,source:'import',lotRef:f.ref};
     const fi=lotScans[f.fichier];
     if(fi){try{const isImg=(fi.type||'').indexOf('image/')===0;const data=isImg?await compressImage(fi):await readData(fi);
-      if(data.length>4200000)tropLourds++;else{const pc={name:fi.name,type:isImg?'image/jpeg':'application/pdf',data};await piecesPut(q.id,[pc]);q.pieces=[{name:pc.name,type:pc.type}];q.hasPdf=true;q.pdfName=pc.name;scans++;if(syncFile.indexOf(q.id)<0)syncFile.push(q.id)}}catch(e){}}
+      if(data.length>4200000)tropLourds++;else{const pc={name:fi.name,type:isImg?'image/jpeg':'application/pdf',data};await piecesPut(q.id,[pc]);q.pieces=[{name:pc.name,type:pc.type}];q.hasPdf=true;q.pdfName=pc.name;scans++;if(syncFile.indexOf(q.id)<0){syncFile.push(q.id);garderFile()}}}catch(e){}}
     state.qhps.push(q);n++;
     if(q.chantier){const ex=state.chantiers.find(c=>c.nom.toLowerCase()===q.chantier.toLowerCase());if(!ex)state.chantiers.push({id:uid(),nom:q.chantier,cond:q.cond||'',maj:t})}
   }
@@ -1027,13 +1116,23 @@ function renderSelects(){
   const sa=document.getElementById('sel-annee'),sm=document.getElementById('sel-mois'),sf=document.getElementById('sel-filtre');if(!sa)return;
   sa.innerHTML=anneesConnues().map(y=>'<option value="'+y+'"'+(y===anAnnee?' selected':'')+'>'+y+'</option>').join('');
   sm.innerHTML='<option value=""'+(anMois===''?' selected':'')+'>📅 Année entière</option>'+MOIS_L.map((m,i)=>'<option value="'+i+'"'+(anMois===i?' selected':'')+'>'+m+'</option>').join('');
-  const opts=['(tous)'].concat(state.secteurs).concat(state.agences.map(a=>'Agence '+a));if(!opts.includes(anFiltre))anFiltre='(tous)';
-  sf.innerHTML=opts.map(o=>'<option value="'+esc(o)+'"'+(o===anFiltre?' selected':'')+'>'+(o==='(tous)'?'👥 Tout le monde':esc(o))+'</option>').join('')}
+  // V3.3.1 : Tout le monde · Agences (une fois chacune) · Groupes (sans les groupes « Agence … » qui doublonnent) · Animateurs par nom
+  const opt=(v,l)=>'<option value="'+esc(v)+'"'+(v===anFiltre?' selected':'')+'>'+esc(l)+'</option>';
+  const groupes=filtreGroupes(),anims=animateurs().map(p=>p.name).sort((a,b)=>a.localeCompare(b,'fr'));
+  const valeurs=['(tous)'].concat(state.agences.map(a=>'Agence '+a),groupes,anims.map(n=>'P:'+n));
+  if(!valeurs.includes(anFiltre))anFiltre='(tous)';
+  sf.innerHTML=opt('(tous)','👥 Tout le monde')
+    +'<optgroup label="📍 Agences">'+state.agences.map(a=>opt('Agence '+a,'Agence '+a)).join('')+'</optgroup>'
+    +(groupes.length?'<optgroup label="👥 Groupes">'+groupes.map(g=>opt(g,g)).join('')+'</optgroup>':'')
+    +(anims.length?'<optgroup label="🎓 Animateurs">'+anims.map(n=>opt('P:'+n,n)).join('')+'</optgroup>':'')}
+function filtreGroupes(){const ag=state.agences.map(a=>cleNomJs(a));
+  return [...new Set(state.secteurs)].filter(g=>{const c=cleNomJs(g).split(' ');return !(c.includes('agence')&&ag.some(a=>c.includes(a)))})}
 function renderSuivi(){fermerPop();renderSelects();const box=document.getElementById('suivi-body');if(!box)return;
   box.innerHTML=anMois===''?(anMode==='cond'?annuelConduc():annuelCollab()):renderMensuel(anAnnee,anMois)}
 function renderAnnuel(){renderSuivi()}
 function filtrer(list){
   if(anFiltre==='(tous)')return list;
+  if(anFiltre.startsWith('P:'))return list.filter(p=>p.name===anFiltre.slice(2));   // V3.3.1 : une personne
   if(anFiltre.startsWith('Agence '))return list.filter(p=>(p.agence||'IDF')===anFiltre.slice(7));
   return list.filter(p=>(state.secteurs.includes(p.secteur)?p.secteur:'(sans groupe)')===anFiltre)}
 function enteteMois(y){let h='';for(let i=0;i<12;i++)h+='<th class="mo'+(y===nowY&&i===nowM?' cur':'')+'" title="Voir '+MOIS_L[i]+' '+y+'" onclick="setMois('+i+')">'+MOIS_S[i].replace('.','')+'</th>';return h}
@@ -1233,6 +1332,7 @@ async function chargerListes(){
   return 'defaut'}
 async function demarrerQhp(){
 await chargerListes();
+setTimeout(repriseEnvois,4000);   // V3.3.1
   document.getElementById('logo').src=window.__LOGO__;
   document.getElementById('logo2').src=window.__LOGO__;
   load();renderFiches();
