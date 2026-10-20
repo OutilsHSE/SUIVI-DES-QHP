@@ -130,3 +130,7 @@
 .banner.err{background:var(--warn-bg);border-color:#f2b8b0;color:var(--warn)}
 .banner.run{background:#eaf1f7;border-color:#c3d6e8;color:var(--marine)}
 #f-ia-etat .banner{margin:8px 0 4px}
+/* V3.4.3 — téléphone : la ligne « intervenant extérieur » passe sur deux lignes (le nom n'est plus écrasé) */
+@media(max-width:480px){.ext-ligne{flex-wrap:wrap}.ext-ligne>input:first-child{flex:1 1 100%}.ext-ligne>input:nth-child(2){flex:1 1 auto;width:auto!important;min-width:0}}
+/* V3.4.3 — téléphone : chaque signature sur sa propre ligne, case pleine largeur (plus facile à signer au doigt), ✕ toujours visible */
+@media(max-width:480px){.sigrow{flex-wrap:wrap}.sigrow .snm{flex:1 1 0;min-width:0}.sigrow canvas{order:5;flex:1 1 100%;width:100%;height:auto;aspect-ratio:336/104}}
