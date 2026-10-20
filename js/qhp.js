@@ -4,7 +4,7 @@
    cases cliquables (a participé / N/A / absent) sans doublon ; l'animateur compte parmi les
    participants ; alerte « fiche en double » (même jour, même animateur) ; mois de départ = N/A ;
    « Animateur » remplace « Conducteur » ; liste des collaborateurs alignée sur le Référentiel. */
-const APP_VERSION_QHP='V3.4.1';   // 20/10/2026 — menu d'une case du suivi : court, N/A en premier, QHP du mois en liste déroulante, reste dans l'écran
+const APP_VERSION_QHP='V3.4.2';   // 20/10/2026 — rythme 4 mois : compté dans le % du mois s'il a fait un QHP (+1), sinon hors %. Reprend la V3.4.1 (menu d'une case court)
 const LS='qhp_app_v5', LS_CONF='qhp_conf_v5';
 const EPOCH='1970-01-01T00:00:00.000Z';
 function nowISO(){return new Date().toISOString()}
@@ -839,7 +839,7 @@ function rapprocherNomLot(lu){
   const cont=r.filter(x=>{const mk=x.k.split(' ');return mots.length&&mots.every(w=>motOk(w,mk))});
   const flou=r.map(x=>({n:x.n,d:distLev(x.k,k)})).filter(x=>x.d<=2).sort((a,b)=>a.d-b.d);
   const props=[...new Set(cont.map(x=>x.n).concat(flou.map(x=>x.n)))];
-  if(cont.length===1&&mots.length>=2)return {sur:cont[0].n,props};          // ex. « CROIZIER Loïc » → « CROIZER Loïc »
+  if(cont.length===1&&mots.length>=2)return {sur:cont[0].n,props};          // ex. « DURANT Paul » → « DURAND Paul »
   if(!cont.length&&flou.length===1)return {sur:flou[0].n,props};             // une ou deux lettres d'écart, un seul candidat
   if(cont.length===1&&mots.length===1)return {sur:'',props,seul:cont[0].n}; // nom seul : proposé, à confirmer
   return {sur:'',props};
@@ -1279,14 +1279,16 @@ function renderMensuel(y,i){
   const yy=String(y),mois=mkey(y,i);
   const qs=qhpsDuMois(y,i);
   const effTous=filtrer(actifs()).filter(p=>moisActif(p,y,i)&&!estExclu(p.name,y,i));
-  const eff=effTous.filter(p=>!quatreMois(p)),hors4=effTous.length-eff.length;   // V3.4 : rythme 4 mois hors %
+  const venu=p=>qs.some(q=>q.present&&q.present[p.name]);
+  /* V3.4.2 : rythme 4 mois → hors % le mois où la personne n'a pas fait de QHP ; si elle en a fait un, elle compte (+1 présent, +1 effectif) */
+  const eff=effTous.filter(p=>!quatreMois(p)||venu(p)),hors4=effTous.length-eff.length;
   const N=eff.length;
   const vus=new Set();qs.forEach(q=>eff.forEach(p=>{if(q.present&&q.present[p.name])vus.add(p.name)}));
   const taux=N?Math.round(vus.size/N*100):0;const ok=taux>=conf.objPart;
   const nbExclus=filtrer(actifs()).filter(p=>moisActif(p,y,i)&&estExclu(p.name,y,i)).length;
   let h='<div class="card no-print"><div class="mois-nav"><button class="btn btn-ghost btn-sm" onclick="setMois(\'\')">◀ Année entière</button><span class="grow"></span><button class="btn btn-ghost btn-sm" onclick="chgMois(-1)">◀</button><b>'+MOIS_L[i]+' '+yy+'</b><button class="btn btn-ghost btn-sm" onclick="chgMois(1)">▶</button></div></div>';
   h+='<div class="kpis"><div class="kpi"><div class="v">'+qs.length+'</div><div class="l">QHP réalisés</div></div>'
-    +'<div class="kpi '+(ok?'goodbg':'warnbg')+'"><div class="v">'+taux+'%</div><div class="l">Participation ('+vus.size+'/'+N+')'+(hors4?'<br><span class="r4" title="réglé dans Réglages ▸ Rythme des QHP">+ '+hors4+' au rythme 4 mois, hors %</span>':'')+'</div></div>'
+    +'<div class="kpi '+(ok?'goodbg':'warnbg')+'"><div class="v">'+taux+'%</div><div class="l">Participation ('+vus.size+'/'+N+')'+(hors4?'<br><span class="r4" title="rythme 1 QHP / 4 mois sans QHP ce mois-ci : non comptés (ceux qui en ont fait un sont comptés)">+ '+hors4+' au rythme 4 mois, hors %</span>':'')+'</div></div>'
     +'<div class="kpi big"><div class="l" style="margin-bottom:2px">Objectif participation '+conf.objPart+'%</div><div class="bar '+(ok?'ok':'warn')+'"><i style="width:'+Math.min(100,taux)+'%"></i><span class="seuil" style="left:'+Math.min(100,conf.objPart)+'%"></span></div><div class="sub">'+(ok?'✅ Objectif atteint':'⛔ '+(conf.objPart-taux)+' pts sous l’objectif')+(nbExclus?' · '+nbExclus+' personne(s) non comptée(s) ce mois':'')+'</div></div></div>';
   // par agence (compact)
   const ags=state.agences.map(a=>{const l=eff.filter(p=>(p.agence||'IDF')===a);if(!l.length)return '';const v=l.filter(p=>vus.has(p.name)).length;const pc=Math.round(v/l.length*100);
