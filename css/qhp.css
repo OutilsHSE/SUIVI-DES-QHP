@@ -134,3 +134,6 @@
 @media(max-width:480px){.ext-ligne{flex-wrap:wrap}.ext-ligne>input:first-child{flex:1 1 100%}.ext-ligne>input:nth-child(2){flex:1 1 auto;width:auto!important;min-width:0}}
 /* V3.4.3 — téléphone : chaque signature sur sa propre ligne, case pleine largeur (plus facile à signer au doigt), ✕ toujours visible */
 @media(max-width:480px){.sigrow{flex-wrap:wrap}.sigrow .snm{flex:1 1 0;min-width:0}.sigrow canvas{order:5;flex:1 1 100%;width:100%;height:auto;aspect-ratio:336/104}}
+/* V3.4.5 — animateurs à corriger */
+.corr-anim{border-left:4px solid #E8720C}.corr-anim .ca-l{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.corr-anim .ca-t{flex:1 1 100%;font-size:14px}.corr-anim .ca-s{flex:1 1 220px;min-width:0}.corr-anim .ca-sug{flex:1 1 100%;font-size:12px;color:#146C3A}.corr-anim .ca-sug.ko{color:#9a5a00}
