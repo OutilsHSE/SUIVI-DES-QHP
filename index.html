@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#003A6E">
 <title>Suivi des QHP — CDES</title>
-<link rel="stylesheet" href="css/qhp.css?v=3.0">
+<link rel="stylesheet" href="css/qhp.css?v=3.1">
 <style>
 /* V3 (19/10/2026) — accueil en tableau, suivi annuel par défaut, cases cliquables, un seul écran Suivi. Styles V3 en fin de bloc. */
 /* V2.2.1 — trois onglets, plusieurs fiches d’un coup, certitude de lecture ; V2.2.1 : stockage local indisponible signalé, fichiers versionnés */
@@ -59,7 +59,17 @@
 .anim-tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:6px;background:#fff3e0;color:#9a5b00;margin-left:6px}
 .m-doublon .sheet{max-width:520px}
 .ref-liste{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
-@media print{.suivi-bar,.legende{display:none!important}}
+/* ===== V3.1 — fiche : aperçu du scan, liste compacte, boutons toujours visibles ===== */
+.apercu{margin:8px 0 10px;border:1.5px solid var(--line);border-radius:12px;background:#fff;overflow:hidden}
+.apercu .ap-h{display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:12.5px;color:var(--muted);background:#f6f9fb;border-bottom:1px solid var(--line)}
+.apercu .ap-h b{color:var(--marine)}.apercu .ap-h .grow{flex:1}.apercu .ap-h button{padding:4px 9px;font-size:12px}
+.apercu img{display:block;width:100%;max-height:60vh;object-fit:contain;background:#eef2f6;cursor:zoom-in}
+.apercu.pliee img{max-height:160px;cursor:pointer}
+.sheet-actions{position:sticky;bottom:-20px;background:var(--bg);padding:10px 0 20px;margin-top:14px;border-top:1px solid var(--line);z-index:3}
+.sheet-actions .btn-primary{font-size:16px}
+#f-groupe{width:auto;max-width:46%;padding:9px 28px 9px 10px;font-size:13.5px;appearance:none;-webkit-appearance:none;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23003A6E' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 9px center}
+.recap .chip .x{margin-left:5px;color:#a3231c;font-weight:700;cursor:pointer}
+@media print{.suivi-bar,.legende,.sheet-actions{display:none!important}}
 </style>
 </head>
 <body>
@@ -222,6 +232,7 @@
 <div class="modal" id="m-fiche"><div class="sheet">
   <div class="grab"></div><h2 id="m-fiche-title">Nouvelle fiche QHP</h2>
   <div id="f-ia-etat"></div>
+  <div id="f-apercu" class="apercu" style="display:none"></div>
   <div class="row"><div class="grow"><label class="f">Date *</label><input type="date" id="f-date"></div>
     <div class="grow"><label class="f">Chantier</label><input type="text" id="f-chantier" list="dl-chantiers" placeholder="Nom du chantier" oninput="chantierPickConduc()"><datalist id="dl-chantiers"></datalist></div></div>
   <label class="f">Thème / sujet *</label><input type="text" id="f-theme" placeholder="Ex. Ligne de tir lors du levage">
@@ -243,9 +254,10 @@
 
   <label class="f" style="margin-top:14px">Participants</label>
   <div class="recap" id="f-recap"></div>
-  <div class="row no-print" style="margin-bottom:2px"><input type="text" id="f-search" class="grow" placeholder="🔎 Filtrer…" oninput="renderPickNames()"><button class="btn btn-ghost btn-sm" onclick="allNames(true)">Tout</button><button class="btn btn-ghost btn-sm" onclick="allNames(false)">Rien</button></div>
+  <div class="row no-print" style="margin-bottom:2px"><input type="text" id="f-search" class="grow" placeholder="🔎 Chercher un nom…" oninput="renderPickNames()"><select id="f-groupe" class="fsel" onchange="renderPickNames()" title="Groupe ou agence"></select><span id="f-toutrien"><button class="btn btn-ghost btn-sm" onclick="allNames(true)">Tout</button><button class="btn btn-ghost btn-sm" onclick="allNames(false)">Rien</button></span></div>
   <div id="f-names"></div>
-  <div class="row" style="margin-top:16px"><button class="btn btn-danger" id="f-del" onclick="deleteFiche()" style="display:none">🗑 Supprimer</button><button class="btn btn-ghost grow" onclick="closeModal()">Annuler</button><button class="btn btn-primary grow" onclick="saveFiche()">Enregistrer</button></div>
+  <p class="hint no-print" id="f-compact-hint" style="display:none">Fiche lue par l’IA : les participants reconnus sont au-dessus. Pour en ajouter un, tape son nom ou choisis un groupe. <a href="#" onclick="ficheCompacte=false;renderPickNames();return false">Afficher toute la liste</a></p>
+  <div class="sheet-actions"><div class="row"><button class="btn btn-danger" id="f-del" onclick="deleteFiche()" style="display:none">🗑 Supprimer</button><button class="btn btn-ghost grow" onclick="closeModal()">Annuler</button><button class="btn btn-primary grow" onclick="saveFiche()">✅ Enregistrer le QHP</button></div></div>
 </div></div>
 <div class="modal" id="m-detail"><div class="sheet" id="detail-body"></div></div>
 <div class="modal m-doublon" id="m-doublon"><div class="sheet"><div class="grab"></div><h2>⚠️ Fiche en double ?</h2><div id="dbl-corps" class="banner"></div>
@@ -254,7 +266,7 @@
 <div id="dropov"><div class="dob"><span class="ic">📎</span>Dépose ici le PDF ou la photo<span>elle sera jointe à la fiche QHP</span></div></div>
 <div id="toast"></div>
 
-<script src="js/logo.js?v=3.0"></script>
-<script src="js/qhp.js?v=3.0"></script>
+<script src="js/logo.js?v=3.1"></script>
+<script src="js/qhp.js?v=3.1"></script>
 </body>
 </html>

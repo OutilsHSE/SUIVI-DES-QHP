@@ -1,5 +1,10 @@
 /* Suivi des QHP — CDES — fonctionnement de l’outil
-   Découpage V2 du 05/10/2026. Ni liste nominative, ni adresse de serveur, ni secret. */
+   Découpage V2 du 05/10/2026. Ni liste nominative, ni adresse de serveur, ni secret.
+   V3 (19/10/2026) — accueil : tableau des derniers QHP ; Suivi : l'année d'abord, un mois au clic ;
+   cases cliquables (a participé / N/A / absent) sans doublon ; l'animateur compte parmi les
+   participants ; alerte « fiche en double » (même jour, même animateur) ; mois de départ = N/A ;
+   « Animateur » remplace « Conducteur » ; liste des collaborateurs alignée sur le Référentiel. */
+const APP_VERSION_QHP='V3.1';   // 20/10/2026 — fiche : aperçu du scan, liste compacte après lecture IA (recherche + menu groupe/agence), boutons toujours visibles
 const LS='qhp_app_v5', LS_CONF='qhp_conf_v5';
 const EPOCH='1970-01-01T00:00:00.000Z';
 function nowISO(){return new Date().toISOString()}
@@ -10,8 +15,8 @@ let SEED={secteurs:[],agences:['IDF','NA','BPL'],roster:[]};
 const SUPPORT='Fonctions Support';
 let state={ secteurs:[], agences:['IDF','NA','BPL'], roster:[], chantiers:[], qhps:[], gestion:{}, exclus:{} };
 let conf={ objPart:80, cadStd:1, cadSup:0.25, webhook:'', secret:'', appareil:'', autoSync:true };
-let editId=null,pickPres={},piecesPending=null;
-let anMode='collab', anAnnee=new Date().getFullYear(), anFiltre='(tous)';
+let editId=null,pickPres={},piecesPending=null,ficheCompacte=false,apercuPliee=false;
+let anMode='collab', anAnnee=new Date().getFullYear(), anFiltre='(tous)', anMois='';   // anMois '' = année entière, sinon 0..11
 const MOIS_S=['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 const MOIS_L=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 const nowY=new Date().getFullYear(), nowM=new Date().getMonth();
@@ -45,6 +50,7 @@ async function pdfGet(id){try{const db=await idb();return await new Promise((r,j
 async function pdfDel(id){try{const db=await idb();await new Promise((r,j)=>{const t=db.transaction('pdf','readwrite');t.objectStore('pdf').delete(id);t.oncomplete=r;t.onerror=()=>j(t.error)})}catch(e){}}
 /* helpers */
 function conducteurs(){return state.roster.filter(p=>p.conducteur)}
+const animateurs=conducteurs;
 function actifs(){return state.roster.filter(p=>!p.dateDepart||p.dateDepart>=todayISO)}
 function cadence(p){return (p.secteur===SUPPORT)?conf.cadSup:conf.cadStd}
 function grouper(list){const g={};state.secteurs.forEach(s=>g[s]=[]);g['(sans groupe)']=[];
@@ -53,22 +59,22 @@ function grouper(list){const g={};state.secteurs.forEach(s=>g[s]=[]);g['(sans gr
 function fillSelect(sel,opts,cur,ph){sel.innerHTML=(ph?('<option value="">'+ph+'</option>'):'')+opts.map(o=>'<option value="'+esc(o)+'"'+(o===cur?' selected':'')+'>'+esc(o)+'</option>').join('')}
 function moisActif(p,y,i){
   if(p.dateAjout){const ay=+p.dateAjout.slice(0,4),am=+p.dateAjout.slice(5,7)-1;if(y<ay)return false;if(y===ay&&i<=am)return false}
-  if(p.dateDepart){const dy=+p.dateDepart.slice(0,4),dm=+p.dateDepart.slice(5,7)-1;if(y>dy)return false;if(y===dy&&i>dm)return false}
+  if(p.dateDepart){const dy=+p.dateDepart.slice(0,4),dm=+p.dateDepart.slice(5,7)-1;if(y>dy)return false;if(y===dy&&i>=dm)return false}   // V3 : N/A dès le mois de sortie
   return true}
 function moisPasse(y,i){return y<nowY||(y===nowY&&i<=nowM)}
 function estExclu(name,y,i){const k=mkey(y,i);return !!(state.exclus[k]&&state.exclus[k][name])}
 function motifExclu(name,y,i){const k=mkey(y,i);return (state.exclus[k]||{})[name]||''}
 function toggleExclu(name,y,i){const k=mkey(y,i);if(!state.exclus[k])state.exclus[k]={};
   if(state.exclus[k][name]){delete state.exclus[k][name];if(!Object.keys(state.exclus[k]).length)delete state.exclus[k]}else state.exclus[k][name]='N/A';
-  state.majDico.exclus[k+'|'+name]=nowISO();save();renderAnnuel();syncAuto()}
+  state.majDico.exclus[k+'|'+name]=nowISO();save();renderSuivi();syncAuto()}
 function agPill(a){return a&&a!=='IDF'?'<span class="agpill '+esc(a)+'">'+esc(a)+'</span>':''}
 /* V2.2 — trois onglets : 🏠 Accueil (enregistrer + à vérifier + dernières fiches),
    📊 Suivi (ce mois / l'année), ⚙️ Réglages. L'historique complet s'ouvre depuis l'accueil. */
-let suiviVue=(function(){try{return localStorage.getItem('qhp_suivi_vue')||'v-mensuel'}catch(e){return 'v-mensuel'}})();
-function goSuivi(v){if(v)suiviVue=v;try{localStorage.setItem('qhp_suivi_vue',suiviVue)}catch(e){}go(suiviVue)}
-function ongletDe(v){return (v==='v-mensuel'||v==='v-annuel')?'suivi':(v==='v-fiches'?'v-accueil':v)}
-function go(v){document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));document.getElementById(v).classList.add('active');document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.v===ongletDe(v)));
-  document.querySelectorAll('.suivi-seg button').forEach(b=>b.classList.toggle('on',b.dataset.s===v));if(v==='v-mensuel')renderMensuel();if(v==='v-annuel')renderAnnuel();if(v==='v-reglages')renderReglages();if(v==='v-fiches')renderFiches();if(v==='v-accueil')renderAccueil();window.scrollTo(0,0)}
+/* V3 : l'onglet Suivi est UN écran (v-suivi) : l'année entière d'abord, un mois quand on le choisit. */
+function ongletDe(v){return v==='v-fiches'?'v-accueil':v}
+function go(v){if(v==='v-mensuel'||v==='v-annuel')v='v-suivi';fermerPop();document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));document.getElementById(v).classList.add('active');document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.v===ongletDe(v)));
+  if(v==='v-suivi')renderSuivi();if(v==='v-reglages')renderReglages();if(v==='v-fiches')renderFiches();if(v==='v-accueil')renderAccueil();window.scrollTo(0,0)}
+function goSuivi(){go('v-suivi')}
 
 /* ===== Accueil : deux commandes, scanner ou saisir ===== */
 function renderAccueil(){const b=document.getElementById('acc-etat');if(!b)return;
@@ -78,6 +84,7 @@ function iaEtat(genre,txt){const b=document.getElementById('f-ia-etat');if(!b)re
   b.innerHTML=txt?'<div class="banner '+(genre==='ok'?'ok':genre==='err'?'err':genre==='run'?'run':'')+'">'+txt+'</div>':''}
 async function scanFiche(files){if(!files||!files.length)return;files=Array.from(files);   // copie : le champ fichier est vidé juste après l'appel
   await openFiche();document.getElementById('m-fiche-title').textContent='Fiche scannée';
+  ficheCompacte=true;renderPickNames();
   await attachFiles(files);
   if(syncConfigure())lireFicheIA();
   else iaEtat('warn','🔌 Lecture automatique indisponible : cet appareil n\'est pas branché. La fiche est jointe ; remplis les champs à la main, ou ouvre l\'outil depuis l\'intranet HSE.')}
@@ -98,25 +105,37 @@ async function openFiche(id){editId=id||null;brouillonOuvert=null;certitudesFich
   document.getElementById('f-chantier').value=q?(q.chantier||''):'';document.getElementById('f-cond').value=q?(q.cond||''):'';
   document.getElementById('f-search').value='';document.getElementById('f-del').style.display=q?'':'none';
   pickPres={};state.roster.forEach(p=>pickPres[p.name]=q&&q.present?!!q.present[p.name]:false);
+  ficheCompacte=false;apercuPliee=false;
+  const sg=document.getElementById('f-groupe');if(sg)fillSelect(sg,state.secteurs.concat(state.agences.map(a=>'Agence '+a)),'','👥 Tous');
   renderPieces();
-  renderPickNames();document.getElementById('m-fiche').classList.add('open')}
+  renderPickNames();document.getElementById('m-fiche').classList.add('open');renderApercu()}
 function chantierPickConduc(){const v=document.getElementById('f-chantier').value.trim().toLowerCase();const ch=state.chantiers.find(c=>c.nom.toLowerCase()===v);const cf=document.getElementById('f-cond');if(ch&&ch.cond&&!cf.value.trim())cf.value=ch.cond}
 function renderRecap(){
   const eff=actifs();const pres=eff.filter(p=>pickPres[p.name]);const abs=eff.filter(p=>!pickPres[p.name]);
   const box=document.getElementById('f-recap');
   box.innerHTML=`<div class="rt"><span>✅ ${pres.length} participant${pres.length>1?'s':''} coché${pres.length>1?'s':''}</span><span class="muted">${abs.length} non coché${abs.length>1?'s':''}</span></div>`+
-   (pres.length?('<div class="chips">'+pres.map(p=>'<span class="chip">'+esc(p.name)+'</span>').join('')+'</div>')
-    :'<div class="hint">Coche les présents ci-dessous — ils s\'afficheront ici.</div>');
+   (pres.length?('<div class="chips">'+pres.map(p=>'<span class="chip'+((certitudesFiche[p.name]||100)<85?' miss':'')+'" title="'+((certitudesFiche[p.name]||100)<85?'lu « '+esc(lusFiche[p.name]||'')+' » — '+certitudesFiche[p.name]+' % : vérifie sur l’aperçu':'')+'">'+esc(p.name)+(p.name===nomRoster(document.getElementById('f-cond').value)?' 🎓':'')+'<span class="x" data-n="'+esc(p.name)+'" onclick="retirerPick(this.dataset.n)" title="Retirer">✕</span></span>').join('')+'</div>')
+    :'<div class="hint">'+(ficheCompacte?'Aucun participant reconnu : tape un nom ci-dessous.':'Coche les présents ci-dessous — ils s\'afficheront ici.')+'</div>');
 }
-function renderPickNames(){const term=(document.getElementById('f-search').value||'').toLowerCase();const box=document.getElementById('f-names');
-  const list=actifs().filter(p=>p.name.toLowerCase().includes(term));const g=grouper(list);let h='';
+function retirerPick(n){pickPres[n]=false;renderPickNames()}
+/* V3.1 — mode COMPACT (fiche scannée / lue par l'IA) : plus de liste de 200 noms à faire défiler.
+   Les reconnus sont dans le récapitulatif (✕ pour retirer) ; la liste n'apparaît que pour une
+   recherche (2 lettres) ou un groupe / une agence choisi. « Afficher toute la liste » revient au mode complet. */
+function filtreGroupe(list){const sg=document.getElementById('f-groupe');const v=sg?sg.value:'';if(!v)return list;
+  if(v.startsWith('Agence '))return list.filter(p=>(p.agence||'IDF')===v.slice(7));
+  return list.filter(p=>(state.secteurs.includes(p.secteur)?p.secteur:'(sans groupe)')===v)}
+function renderPickNames(){const term=(document.getElementById('f-search').value||'').toLowerCase().trim();const box=document.getElementById('f-names');
+  const sg=document.getElementById('f-groupe'),hint=document.getElementById('f-compact-hint'),tr=document.getElementById('f-toutrien');
+  if(hint)hint.style.display=ficheCompacte?'':'none';if(tr)tr.style.display=ficheCompacte?'none':'';
+  if(ficheCompacte&&term.length<2&&!(sg&&sg.value)){box.innerHTML='';renderRecap();return}
+  const list=filtreGroupe(actifs().filter(p=>p.name.toLowerCase().includes(term)));const g=grouper(list);let h='';
   Object.keys(g).forEach(sec=>{const people=g[sec];if(!people.length)return;const on=people.filter(p=>pickPres[p.name]).length;
     h+=`<div class="secgrp"><div class="sh"><span>${esc(sec)}</span><span class="cnt">${on}/${people.length} · <a href="#" onclick="secAll('${esc(sec).replace(/'/g,"\\'")}',true);return false">tout</a> · <a href="#" onclick="secAll('${esc(sec).replace(/'/g,"\\'")}',false);return false">rien</a></span></div><div class="names">`;
     h+=people.map(p=>`<div class="nm ${pickPres[p.name]?'on':''} ${(certitudesFiche[p.name]||100)<85?'incertain':''}" title="${(certitudesFiche[p.name]||100)<85?'lu « '+esc(lusFiche[p.name]||'')+' » — '+certitudesFiche[p.name]+' % : vérifie':''}" onclick="togglePick(this,'${esc(p.name).replace(/'/g,"\\'")}')"><span class="bx">${pickPres[p.name]?'✓':''}</span><span class="nn">${esc(p.name)}${p.conducteur?' 🎓':''}${agPill(p.agence)}</span></div>`).join('');h+='</div></div>'});
-  box.innerHTML=h||'<div class="hint">Aucun collaborateur actif.</div>';renderRecap()}
+  box.innerHTML=h||'<div class="hint">'+(term||(sg&&sg.value)?'Aucun nom ne correspond.':'Aucun collaborateur actif.')+'</div>';renderRecap()}
 function togglePick(el,n){pickPres[n]=!pickPres[n];el.classList.toggle('on',pickPres[n]);el.querySelector('.bx').textContent=pickPres[n]?'✓':'';renderRecap()}
 function secAll(sec,v){const g=grouper(actifs());(g[sec]||[]).forEach(p=>pickPres[p.name]=v);renderPickNames()}
-function allNames(v){const term=(document.getElementById('f-search').value||'').toLowerCase();actifs().filter(p=>p.name.toLowerCase().includes(term)).forEach(p=>pickPres[p.name]=v);renderPickNames()}
+function allNames(v){const term=(document.getElementById('f-search').value||'').toLowerCase().trim();filtreGroupe(actifs().filter(p=>p.name.toLowerCase().includes(term))).forEach(p=>pickPres[p.name]=v);renderPickNames()}
 /* --- pièces jointes : PDF + photos (canaux 1 et 2) --- */
 function readData(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=()=>rej(r.error);r.readAsDataURL(f)})}
 async function compressImage(f,max){max=max||1600;let bmp=null;
@@ -136,7 +155,7 @@ async function attachFiles(files){if(!files||!files.length)return;if(!Array.isAr
       piecesPending.push({name:f.name||(isImg?'photo.jpg':'emargement.pdf'),type:isImg?'image/jpeg':'application/pdf',data});n++}
     catch(e){toast('Lecture impossible : '+(f.name||'?'),true)}
   }
-  renderPieces();if(n)toast(n+' pièce'+(n>1?'s jointes':' jointe')+' ✓')}
+  renderPieces();renderApercu();if(n)toast(n+' pièce'+(n>1?'s jointes':' jointe')+' ✓')}
 function renderPieces(){const box=document.getElementById('f-pieces');if(!box)return;const arr=Array.isArray(piecesPending)?piecesPending:[];
   box.innerHTML=arr.map((p,i)=>{const img=(p.type||'').indexOf('image/')===0;
     return '<div class="pc"><button class="px" onclick="delPiece('+i+')" title="Retirer">✕</button>'+
@@ -144,7 +163,7 @@ function renderPieces(){const box=document.getElementById('f-pieces');if(!box)re
       '<div class="pn">'+esc(p.name)+'</div></div>'}).join('');
   document.getElementById('f-pdf-info').innerHTML=arr.length?('<span class="muted">'+arr.length+' pièce'+(arr.length>1?'s':'')+' jointe'+(arr.length>1?'s':'')+' — touche une vignette pour l\'ouvrir</span>'):'';
   const bia=document.getElementById('f-ia');if(bia)bia.style.display=(arr.length&&syncConfigure())?'':'none'}
-function delPiece(i){if(!Array.isArray(piecesPending))return;piecesPending.splice(i,1);renderPieces()}
+function delPiece(i){if(!Array.isArray(piecesPending))return;piecesPending.splice(i,1);renderPieces();renderApercu()}
 function viewPending(i){const p=(piecesPending||[])[i];if(p)openBlob(p)}
 function openBlob(p){try{const b64=String(p.data||'').split(',')[1]||'';const bin=atob(b64);const u8=new Uint8Array(bin.length);
   for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
@@ -170,6 +189,26 @@ async function piecesGetOuTelecharger(id){
   return items}
 async function piecesPut(id,items){if(!items||!items.length){await pdfDel(id);return}await pdfPut(id,{items})}
 function nbPieces(q){return q.pieces?q.pieces.length:(q.hasPdf?1:0)}
+/* V3.1 — APERÇU DU SCAN en tête de fiche : la fiche d'émargement (photo, ou 1re page du PDF rendue
+   par pdf.js) s'affiche en grand au-dessus des champs, pour contrôler d'un coup d'œil ce que l'IA a lu.
+   Plusieurs pièces : ◀ ▶. Touche l'image pour l'ouvrir en plein écran, l'en-tête pour la replier. */
+let apercuIdx=0;
+async function apercuImage(p){
+  if(!p)return '';
+  if((p.type||'').indexOf('image/')===0)return p.data;
+  if(p.type==='application/pdf'){if(p.apercu)return p.apercu;try{const pages=await pdfEnImages(p.data,1);p.apercu=pages[0]||'';return p.apercu}catch(e){return ''}}
+  return ''}
+async function renderApercu(){
+  const box=document.getElementById('f-apercu');if(!box)return;const arr=Array.isArray(piecesPending)?piecesPending:[];
+  if(!arr.length){box.style.display='none';box.innerHTML='';return}
+  if(apercuIdx>=arr.length)apercuIdx=0;const p=arr[apercuIdx];
+  box.style.display='';box.className='apercu'+(apercuPliee?' pliee':'');
+  box.innerHTML='<div class="ap-h" onclick="apercuPliee=!apercuPliee;renderApercu()"><b>🖼 Fiche scannée</b><span>'+esc(p.name)+(arr.length>1?' · '+(apercuIdx+1)+'/'+arr.length:'')+'</span><span class="grow"></span>'
+    +(arr.length>1?'<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();apercuIdx=(apercuIdx+'+(arr.length-1)+')%'+arr.length+';renderApercu()">◀</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();apercuIdx=(apercuIdx+1)%'+arr.length+';renderApercu()">▶</button>':'')
+    +'<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();apercuPliee=!apercuPliee;renderApercu()">'+(apercuPliee?'Agrandir':'Replier')+'</button></div><div class="ap-i"><span class="hint" style="padding:8px;display:block">chargement…</span></div>';
+  const src=await apercuImage(p);const zone=box.querySelector('.ap-i');if(!zone)return;
+  zone.innerHTML=src?'<img src="'+src+'" alt="fiche scannée" onclick="'+(apercuPliee?'apercuPliee=false;renderApercu()':'viewPending('+apercuIdx+')')+'">':'<span class="hint" style="padding:8px;display:block">Aperçu indisponible — touche la vignette ci-dessous pour ouvrir le fichier.</span>';
+}
 /* --- glisser-déposer : TOUTE la page est une zone de dépôt --- */
 (function(){
   const ov=document.getElementById('dropov');let hideT=null;
@@ -196,8 +235,12 @@ function nbPieces(q){return q.pieces?q.pieces.length:(q.hasPdf?1:0)}
     attachFiles(fs);
   },false);
 })();
-async function saveFiche(){const date=document.getElementById('f-date').value,theme=document.getElementById('f-theme').value.trim();
+async function saveFiche(force){const date=document.getElementById('f-date').value,theme=document.getElementById('f-theme').value.trim();
   if(!date){toast('Renseigne la date',true);return}if(!theme){toast('Renseigne le thème',true);return}
+  const condSaisi=document.getElementById('f-cond').value.trim();
+  const an=nomRoster(condSaisi);if(an)pickPres[an]=true;   // V3 : l'animateur participe
+  if(!force){const dbl=doublonFiche(date,condSaisi,editId);
+    if(dbl){demanderDoublon(dbl,()=>saveFiche(true),()=>{const pending=piecesPending;openFiche(dbl.id).then(()=>{if(Array.isArray(pending)&&pending.length){piecesPending=(piecesPending||[]).concat(pending);renderPieces()}})});return}}
   const present={};state.roster.forEach(p=>{if(pickPres[p.name])present[p.name]=true});
   let q;if(editId)q=state.qhps.find(x=>x.id===editId);else{q={id:uid()};state.qhps.push(q)}
   q.date=date;q.theme=theme;q.chantier=document.getElementById('f-chantier').value.trim();q.cond=document.getElementById('f-cond').value.trim();
@@ -213,7 +256,7 @@ function deleteFiche(){if(!editId)return;if(!confirm('Supprimer cette fiche QHP 
 async function openDetail(id){const q=state.qhps.find(x=>x.id===id);if(!q)return;
   const pres=state.roster.filter(p=>q.present&&q.present[p.name]);
   const g=grouper(pres);let byg='';Object.keys(g).forEach(s=>{byg+=`<div style="margin-top:6px"><b class="small" style="color:var(--marine)">${esc(s)}</b><div>${g[s].map(p=>'<span class="pill ok" style="margin:2px">'+esc(p.name)+'</span>').join(' ')}</div></div>`});
-  document.getElementById('detail-body').innerHTML=`<div class="grab"></div><h2>${esc(q.theme||'(sans thème)')}</h2><p class="muted small">${frDate(q.date)} · ${esc(q.chantier||'—')}${q.cond?' · animé par '+esc(q.cond):''}</p>
+  document.getElementById('detail-body').innerHTML=`<div class="grab"></div><h2>${esc(q.theme||'(sans thème)')}</h2><p class="muted small">${frDate(q.date)} · ${esc(q.chantier||'—')}${q.cond?' · 🎓 animateur : '+esc(q.cond):''}</p>
     <div class="kpis" style="margin:12px 0"><div class="kpi"><div class="v">${pres.length}</div><div class="l">Participants</div></div><div class="kpi"><div class="v">${actifs().length?Math.round(pres.length/actifs().length*100):0}%</div><div class="l">de l'effectif</div></div></div>
     ${q.remontees?`<label class="f">Remontées terrain</label><div class="card" style="margin:0 0 10px;padding:10px;white-space:pre-wrap">${esc(q.remontees)}</div>`:''}
     ${q.emarg?`<button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="printEmarg('${q.id}')">✍️ Ouvrir la fiche signée (impression / PDF)</button>`:''}
@@ -221,6 +264,7 @@ async function openDetail(id){const q=state.qhps.find(x=>x.id===id);if(!q)return
     <div id="d-pieces" class="pieces">${nbPieces(q)?'<span class="muted small">chargement…</span>':'<span class="muted small">aucune</span>'}</div>
     ${q.externes&&q.externes.length?`<label class="f">Intervenants extérieurs</label><div>${q.externes.map(e=>'<span class="pill" style="margin:2px">'+esc(e.name)+(e.soc?' · '+esc(e.soc):'')+'</span>').join(' ')}</div>`:''}
     <label class="f">Participants CDES (${pres.length})</label>${byg||'<span class="muted small">aucun</span>'}
+    <p class="hint">Pour ajouter ou retirer un participant : ✏ Modifier, ou touche sa case dans le Suivi.</p>
     <div class="row" style="margin-top:16px"><button class="btn btn-ghost grow" onclick="closeModal()">Fermer</button><button class="btn btn-primary grow" onclick="closeModal();openFiche('${q.id}')">✏ Modifier</button></div>`;
   document.getElementById('m-detail').classList.add('open');
   if(nbPieces(q)){const items=await piecesGetOuTelecharger(q.id);const box=document.getElementById('d-pieces');if(!box)return;
@@ -293,6 +337,7 @@ function appliquerSync(d){
   if(Array.isArray(d.qhps))state.qhps=d.qhps;
   if(Array.isArray(d.roster))state.roster=d.roster.map(p=>Object.assign({dateAjout:'',dateDepart:'',agence:'IDF'},p));
   state.rosterSource=d.rosterSource==='referentiel'?'referentiel':'appli';   // V2.1 : liste tenue dans le Référentiel CDES
+  if(d.referentiel&&typeof d.referentiel==='object')state.referentiel=d.referentiel;   // V3 : état du branchement, en clair
   if(Array.isArray(d.chantiers))state.chantiers=d.chantiers;
   if(Array.isArray(d.secteurs)&&d.secteurs.length)state.secteurs=d.secteurs;
   if(d.tombQhps)state.tomb.qhps=d.tombQhps;
@@ -315,8 +360,7 @@ async function syncNow(manuel){
     syncFile=reste;
     conf.dernierSync=nowISO();try{localStorage.setItem(LS_CONF,JSON.stringify(conf))}catch(e){}
     renderFiches();renderDernieres();
-    if(document.getElementById('v-annuel').classList.contains('active'))renderAnnuel();
-    if(document.getElementById('v-mensuel').classList.contains('active'))renderMensuel();
+    if(document.getElementById('v-suivi').classList.contains('active'))renderSuivi();
     if(document.getElementById('v-reglages').classList.contains('active'))renderReglages();
     syncEtat('✅ Synchronisé à '+new Date().toLocaleTimeString('fr-FR').slice(0,5),'ok-txt');
     if(manuel)toast('Synchronisé ✓ — '+state.qhps.length+' fiches');
@@ -471,7 +515,7 @@ function appliquerExtrait(e){
   renderPickNames();
   const nbN=(e.noms||[]).length, t=tauxLecture(e), inc=Object.keys(certitudesFiche).filter(n=>certitudesFiche[n]<85).length;
   let msg='✅ <b>Champs remplis par l’IA</b> · '+nbN+' participant'+(nbN>1?'s':'')+' reconnu'+(nbN>1?'s':'')+' · <span class="taux '+classeTaux(t)+'">lecture '+t+' %</span>';
-  if(inc)msg+='<br>🟧 '+inc+' nom'+(inc>1?'s':'')+' rattaché'+(inc>1?'s':'')+' avec un doute : surligné'+(inc>1?'s':'')+' en orange dans la liste, vérifie-'+(inc>1?'les':'le')+'.';
+  if(inc)msg+='<br>🟧 '+inc+' nom'+(inc>1?'s':'')+' rattaché'+(inc>1?'s':'')+' avec un doute : en orange dans le récapitulatif, compare avec la fiche scannée ci-dessous.';
   if((e.ambigus||[]).length)msg+='<br>🤔 <b>À trancher</b> : '+e.ambigus.map(a=>'« '+esc(a.lu)+' » → '+a.candidats.map(esc).join(' ou ')).join(' · ')+' — coche à la main.';
   if((e.nonReconnus||[]).length)msg+='<br><span class="nondech">🟥 <b>Non déchiffrés</b> : '+e.nonReconnus.map(n=>'« '+esc(n)+' »').join(', ')+' — personne de la liste ne correspond.</span>';
   if(e.illisibles)msg+='<br><span class="nondech">🟥 '+e.illisibles+' mot'+(e.illisibles>1?'s':'')+' illisible'+(e.illisibles>1?'s':'')+' sur la fiche : compare avec le papier.</span>';
@@ -530,8 +574,9 @@ function retirerBrouillon(id){if(!confirm('Retirer cette fiche de la liste « À
 async function ouvrirBrouillon(id){
   const b=brouillons().find(x=>x.id===id);if(!b)return;
   await openFiche();
-  const v=await pdfGet('br_'+id);piecesPending=(v&&v.items)?v.items.slice():[];renderPieces();
+  const v=await pdfGet('br_'+id);piecesPending=(v&&v.items)?v.items.slice():[];renderPieces();renderApercu();
   document.getElementById('m-fiche-title').textContent='Fiche lue par l’IA — à vérifier';
+  ficheCompacte=true;renderPickNames();
   if(b.extrait)appliquerExtrait(b.extrait);else iaEtat('warn','Lecture automatique non faite'+(b.erreur?' ('+esc(b.erreur)+')':'')+' : remplis les champs à la main.');
   brouillonOuvert=id;
 }
@@ -550,7 +595,8 @@ function renderBrouillons(){
       const nr=(e.nonReconnus||[]).map(n=>'<span class="bn ko" title="non déchiffré">'+esc(n)+'</span>').join('');
       return '<div class="brc '+b.etat+'">'
         +'<div class="brh"><b>'+(e.date?esc(frDate(e.date)):'Date ?')+'</b> · '+esc(e.chantier||'chantier ?')+(e.animateur?' · '+esc(e.animateur):'')
-        +(t!==null?'<span class="taux '+classeTaux(t)+'">lecture '+t+' %</span>':'')+'</div>'
+        +(t!==null?'<span class="taux '+classeTaux(t)+'">lecture '+t+' %</span>':'')
+        +(b.etat==='pret'&&doublonFiche(e.date,e.animateur,null)?'<span class="taux ko" title="une fiche existe déjà ce jour-là pour cet animateur">⚠️ doublon ?</span>':'')+'</div>'
         +'<div class="brt">'+(b.etat==='attente'?'⏳ En attente de lecture':b.etat==='lecture'?'🤖 Lecture en cours…':b.etat==='erreur'?'⚠️ Lecture impossible : '+esc(b.erreur||'?'):esc(e.theme||'(thème non lu)'))+'</div>'
         +(b.etat==='pret'?'<div class="brn">'+noms+amb+nr+(e.illisibles?'<span class="bn ko">'+e.illisibles+' illisible'+(e.illisibles>1?'s':'')+'</span>':'')+'</div>':'')
         +'<div class="bra"><span class="small muted">📎 '+esc(b.nom)+'</span><span class="grow"></span>'
@@ -558,14 +604,42 @@ function renderBrouillons(){
         +'<button class="btn btn-ghost btn-sm" onclick="retirerBrouillon(\''+b.id+'\')">🗑</button>'
         +'<button class="btn btn-primary btn-sm" '+(b.etat==='attente'||b.etat==='lecture'?'disabled':'')+' onclick="ouvrirBrouillon(\''+b.id+'\')">Vérifier et enregistrer</button></div></div>'}).join('')+'</div>';
 }
+/* V3 — l'accueil montre un TABLEAU simple des derniers QHP : date, animateur, chantier,
+   participants, sujets. Un conducteur y voit sa fiche apparaître ; une ligne s'ouvre au clic. */
+const ACC_NB=10;
+function nbParticipants(q){return Object.values(q.present||{}).filter(Boolean).length+((q.externes||[]).length)}
+function ligneQhp(q){const d=new Date((q.date||'')+'T00:00');
+  return '<tr class="cl" data-id="'+esc(q.id)+'" onclick="openDetail(this.dataset.id)"><td><span class="dj">'+(isNaN(d)?'?':d.getDate())+'</span><span class="dm">'+(isNaN(d)?'':MOIS_S[d.getMonth()]+' '+d.getFullYear())+'</span></td>'
+    +'<td>'+esc(q.cond||'—')+'</td><td>'+esc(q.chantier||'—')+'</td><td class="nb">'+nbParticipants(q)+'</td><td class="suj">'+esc(q.theme||'')+(q.emarg?' <span title="fiche signée en ligne">✍️</span>':'')+(nbPieces(q)?' <span title="pièce jointe">📎</span>':'')+'</td></tr>'}
+function tableQhps(list){return '<div class="tbl-wrap"><table class="acc-tab"><thead><tr><th>Date</th><th>Animateur</th><th>Chantier</th><th style="text-align:center">Particip.</th><th>Sujets</th></tr></thead><tbody>'+list.map(ligneQhp).join('')+'</tbody></table></div>'}
 function renderDernieres(){
   const box=document.getElementById('acc-fiches');if(!box)return;
-  const list=[...state.qhps].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,5);
+  const list=[...state.qhps].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||String(b.maj||'').localeCompare(String(a.maj||''))).slice(0,ACC_NB);
   if(!list.length){box.innerHTML='';return}
-  box.innerHTML='<h2 class="acc-titre">Dernières fiches <a href="#" class="acc-tout" onclick="go(\'v-fiches\');return false">Tout l’historique ('+state.qhps.length+') ›</a></h2>'
-    +list.map(q=>{const d=new Date((q.date||'')+'T00:00');const nb=Object.values(q.present||{}).filter(Boolean).length;
-      return '<div class="qhp" onclick="openDetail(\''+q.id+'\')"><div class="d"><b>'+(isNaN(d)?'?':d.getDate())+'</b><span>'+(isNaN(d)?'':MOIS_S[d.getMonth()].replace('.',''))+'</span></div><div class="i"><div class="t">'+esc(q.theme||'(sans thème)')+'</div><div class="s">'+esc(q.chantier||'—')+(q.cond?' · '+esc(q.cond):'')+' · '+nb+' participant'+(nb>1?'s':'')+'</div></div></div>'}).join('');
+  box.innerHTML='<h2 class="acc-titre">Derniers QHP <a href="#" class="acc-tout" onclick="go(\'v-fiches\');return false">Tout l’historique ('+state.qhps.length+') ›</a></h2>'+tableQhps(list);
 }
+
+/* ===== V3 — L'ANIMATEUR PARTICIPE FORCÉMENT AU QHP =====
+   Dans la fiche comme dans l'émargement, choisir l'animateur le coche parmi les participants
+   (s'il est dans la liste des collaborateurs). Plus de doublon « animateur » / « participants ». */
+function nomRoster(n){n=String(n||'').trim();if(!n)return '';const ex=state.roster.find(p=>p.name===n);if(ex)return ex.name;
+  const c=cleNomJs(n);const l=state.roster.filter(p=>cleNomJs(p.name)===c);return l.length===1?l[0].name:''}
+function cleNomJs(n){return String(n||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9 ]+/g,' ').split(' ').filter(Boolean).sort().join(' ')}
+function animateurParticipe(){const n=nomRoster(document.getElementById('f-cond').value);if(!n)return;if(!pickPres[n]){pickPres[n]=true;renderPickNames();toast(n+' compté parmi les participants (animateur)')}}
+function emargAnimateurParticipe(){const n=nomRoster(document.getElementById('e-anim').value);if(!n)return;if(!emargPick[n]){emargPick[n]=true;renderEmargPick();renderSigs();toast(n+' ajouté aux participants (animateur)')}}
+
+/* ===== V3 — FICHE EN DOUBLE : même jour, même animateur =====
+   Avant d'enregistrer (saisie, scan, lot IA, émargement, import) : si une fiche existe déjà ce
+   jour-là pour cet animateur, on prévient, et on peut ouvrir l'existante au lieu d'en créer une. */
+function doublonFiche(date,cond,saufId){const c=cleNomJs(cond);if(!date||!c)return null;
+  return state.qhps.find(q=>q.id!==saufId&&q.date===date&&cleNomJs(q.cond)===c)||null}
+function texteDoublon(q){return 'Une fiche existe déjà le <b>'+esc(frDate(q.date))+'</b> animée par <b>'+esc(q.cond)+'</b> : '+esc(q.chantier||'chantier ?')+', '+nbParticipants(q)+' participant'+(nbParticipants(q)>1?'s':'')+(q.theme?', « '+esc(q.theme)+' »':'')+'.'}
+let dblGarder=null;
+function demanderDoublon(q,surGarder,surOuvrir){
+  document.getElementById('dbl-corps').innerHTML=texteDoublon(q)+'<br>S’agit-il du même QHP ? Ouvre l’existante pour la compléter, ou enregistre quand même s’il y a bien eu deux QHP.';
+  document.getElementById('dbl-garder').onclick=()=>{closeModal();surGarder()};
+  document.getElementById('dbl-ouvrir').onclick=()=>{closeModal();surOuvrir()};
+  document.getElementById('m-doublon').classList.add('open')}
 
 /* ===== CANAL 3 : fiche d'émargement HTML ===== */
 let emargPick={},emargExt=[],emargSigs={},emargYN={risques:null,formes:null,nouvel:null,accueil:null,epi:null};
@@ -665,8 +739,12 @@ async function saveEmarg(){
   if(!date){toast('Renseigne la date',true);return}
   if(!anim){toast("Renseigne l'animateur",true);return}
   if(!theme){toast('Renseigne les flashs / thèmes abordés',true);return}
+  const anR=nomRoster(anim);if(anR)emargPick[anR]=true;   // V3 : l'animateur participe
   const noms=emargNoms();
   if(!noms.length){toast('Coche au moins un participant',true);return}
+  const dbl=doublonFiche(date,anim,null);
+  if(dbl&&!window.__emargForce){if(!confirm('Une fiche existe déjà le '+frDate(dbl.date)+' animée par '+dbl.cond+' ('+(dbl.chantier||'chantier ?')+', '+nbParticipants(dbl)+' participants).\n\nValider quand même cette nouvelle fiche ?'))return}
+  window.__emargForce=false;
   const nonSignes=noms.filter(o=>!emargSigs[o.key]);
   if(nonSignes.length&&!confirm(nonSignes.length+' participant(s) sans signature :\n'+nonSignes.slice(0,8).map(o=>'· '+o.nom).join('\n')+(nonSignes.length>8?'\n…':'')+'\n\nValider quand même ?'))return;
   const present={};actifs().forEach(p=>{if(emargPick[p.name])present[p.name]=true});
@@ -705,6 +783,7 @@ async function importFiche(inp){const f=inp.files[0];if(!f)return;inp.value='';
     if(!j||j.type!=='qhp-fiche'||!j.fiche||!j.fiche.id)throw 0;
     const q=j.fiche;
     if(state.qhps.some(x=>x.id===q.id)){toast('Cette fiche est déjà importée',true);return}
+    const dbl=doublonFiche(q.date,q.cond,null);if(dbl&&!confirm('Une fiche existe déjà le '+frDate(dbl.date)+' animée par '+dbl.cond+' ('+(dbl.chantier||'?')+'). Importer quand même ?'))return;
     if(!confirm('Importer la fiche du '+frDate(q.date)+' — '+(q.chantier||'?')+' ('+Object.keys(q.present||{}).length+' participants) ?'))return;
     q.present=q.present&&typeof q.present==='object'?q.present:{};
     state.qhps.push(q);
@@ -756,8 +835,8 @@ function chantiersCouvertsCond(cond,y,i){const k=mkey(y,i);const s=new Set();sta
 function bilanIndividuel(p,y){
   let tot=0,attendu=0;
   for(let i=0;i<12;i++){
+    if(presentDansMois(p.name,y,i))tot++;               // V3 : une présence compte toujours (même le mois du départ)
     if(!moisActif(p,y,i))continue;
-    if(presentDansMois(p.name,y,i))tot++;
     if(moisPasse(y,i)&&!estExclu(p.name,y,i))attendu+=cadence(p);
   }
   const taux=attendu>0?tot/attendu:null;
@@ -767,125 +846,132 @@ function bilanIndividuel(p,y){
 }
 const ICO={ok:'<span class="alert-ico" title="Objectif tenu">✅</span>',moyen:'<span class="alert-ico" title="En dessous de 80 % de l\'attendu">⚠️</span>',ko:'<span class="alert-ico" title="Aucun QHP">🚫</span>',neutre:''};
 
-/* ===== MENSUEL ===== */
-function setMoisCourant(){document.getElementById('bilan-mois').value=new Date().toISOString().slice(0,7);renderMensuel()}
-function renderMensuel(){const mois=document.getElementById('bilan-mois').value||new Date().toISOString().slice(0,7);const [yy,mm]=mois.split('-');
-  const y=+yy,i=(+mm)-1;
-  const qs=state.qhps.filter(q=>(q.date||'').slice(0,7)===mois);
-  const eff=actifs().filter(p=>moisActif(p,y,i)&&!estExclu(p.name,y,i));
-  const N=eff.length;
-  const vus=new Set();qs.forEach(q=>eff.forEach(p=>{if(q.present&&q.present[p.name])vus.add(p.name)}));
-  const taux=N?Math.round(vus.size/N*100):0;const ok=taux>=conf.objPart;
-  const nbExclus=actifs().filter(p=>moisActif(p,y,i)&&estExclu(p.name,y,i)).length;
-  let h=`<div class="card"><h2>📊 ${MOIS_L[i]} ${yy}</h2><div class="kpis">
-    <div class="kpi"><div class="v">${qs.length}</div><div class="l">QHP réalisés</div></div>
-    <div class="kpi ${ok?'goodbg':'warnbg'}"><div class="v">${taux}%</div><div class="l">Participation (${vus.size}/${N})</div></div>
-    <div class="kpi big"><div class="l" style="margin-bottom:2px">Objectif participation ${conf.objPart}%</div><div class="bar ${ok?'ok':'warn'}"><i style="width:${Math.min(100,taux)}%"></i><span class="seuil" style="left:${Math.min(100,conf.objPart)}%"></span></div><div class="sub">${ok?'✅ Objectif atteint':'⛔ '+(conf.objPart-taux)+' pts sous l\'objectif'}${nbExclus?' · '+nbExclus+' personne(s) non comptée(s) ce mois':''}</div></div></div></div>`;
-  // par agence
-  h+=`<div class="card"><h2>📍 Par agence</h2><div class="tbl-wrap"><table><thead><tr><th>Agence</th><th style="text-align:center">Vus / effectif</th><th style="text-align:center">Taux</th></tr></thead><tbody>`;
-  state.agences.forEach(a=>{const l=eff.filter(p=>(p.agence||'IDF')===a);if(!l.length)return;const v=l.filter(p=>vus.has(p.name)).length;const pc=Math.round(v/l.length*100);
-    h+=`<tr><td><b>${esc(a)}</b></td><td style="text-align:center">${v}/${l.length}</td><td style="text-align:center"><span class="pill ${pc>=conf.objPart?'ok':pc>=50?'mid':'warn'}">${pc}%</span></td></tr>`});
-  h+='</tbody></table></div></div>';
-  // par groupe
-  h+=`<div class="card"><h2>🏗️ Par groupe</h2><div class="tbl-wrap"><table><thead><tr><th>Groupe</th><th style="text-align:center">Vus / effectif</th><th style="text-align:center">Taux</th></tr></thead><tbody>`;
-  const g=grouper(eff);Object.keys(g).forEach(sec=>{const v=g[sec].filter(p=>vus.has(p.name)).length;const pc=g[sec].length?Math.round(v/g[sec].length*100):0;
-    h+=`<tr><td>${esc(sec)}</td><td style="text-align:center">${v}/${g[sec].length}</td><td style="text-align:center"><span class="pill ${pc>=conf.objPart?'ok':pc>=50?'mid':'warn'}">${pc}%</span></td></tr>`});
-  h+='</tbody></table></div></div>';
-  // liste
-  h+=`<div class="card"><h2>🗂 QHP du mois (${qs.length})</h2>`;
-  if(!qs.length)h+='<p class="hint">Aucun QHP ce mois.</p>';else{h+='<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Thème</th><th>Chantier</th><th>Conduc.</th><th style="text-align:center">Part.</th></tr></thead><tbody>';qs.sort((a,b)=>(a.date||'').localeCompare(b.date||'')).forEach(q=>{const nb=Object.values(q.present||{}).filter(Boolean).length;h+=`<tr><td>${frDate(q.date)}</td><td>${esc(q.theme||'')}</td><td>${esc(q.chantier||'—')}</td><td>${esc(q.cond||'—')}</td><td style="text-align:center">${nb}</td></tr>`});h+='</tbody></table></div>'}
-  h+='</div>';
-  document.getElementById('mensuel-body').innerHTML=h}
-
-/* V2 — la reprise historique janvier→mars 2026 (import unique, déjà fait : fiches « Reprise historique »
-   du classeur) contenait des présences nominatives : retirée de la page publique. */
-
-/* ===== ANNUEL ===== */
-function setAnnuel(m){anMode=m;document.getElementById('tg-collab').classList.toggle('on',m==='collab');document.getElementById('tg-cond').classList.toggle('on',m==='cond');renderAnnuel()}
-function chgAnnee(d){anAnnee+=d;renderAnnuel()}
-function renderAnnuel(){document.getElementById('an-annee').textContent=anAnnee;
-  const filt=document.getElementById('an-filtre');
-  const opts=['(tous)'].concat(state.secteurs).concat(state.agences.map(a=>'Agence '+a));
-  if(!opts.includes(anFiltre))anFiltre='(tous)';
-  filt.innerHTML='<select onchange="anFiltre=this.value;renderAnnuel()">'+opts.map(o=>'<option'+(o===anFiltre?' selected':'')+'>'+esc(o)+'</option>').join('')+'</select>';
-  document.getElementById('annuel-body').innerHTML=anMode==='cond'?annuelConduc():annuelCollab()}
+/* ============================================================================
+   V3 — SUIVI : UN SEUL ÉCRAN. L'ANNÉE ENTIÈRE D'ABORD, UN MOIS AU CLIC.
+   Barre : [Collaborateurs | Animateurs] + menus Année · Mois · Groupe/agence.
+   · Collaborateurs : qui a participé, mois par mois. Une case se touche :
+       ✗ absent  → « a participé » (on choisit le QHP du mois, ou on crée la fiche) ou N/A ;
+       V présent → retirer d'une fiche, ou N/A ;  N/A → remettre absent, ou « a participé ».
+     Pas de doublon possible : une personne est comptée une fois par fiche, une fois par mois.
+   · Animateurs : une ligne par animateur, QHP animés par mois + total.
+   · Un mois : indicateurs du mois, QHP du mois (tableau), participation par agence.
+   ============================================================================ */
+function setAnnuel(m){anMode=m;document.getElementById('tg-collab').classList.toggle('on',m==='collab');document.getElementById('tg-cond').classList.toggle('on',m==='cond');renderSuivi()}
+function setMois(v){anMois=(v===''||v===null||v===undefined)?'':+v;renderSuivi()}
+function chgAnnee(d){anAnnee+=d;renderSuivi()}
+function chgMois(d){if(anMois==='')return;let i=anMois+d;if(i<0){i=11;anAnnee--}if(i>11){i=0;anAnnee++}anMois=i;renderSuivi()}
+function anneesConnues(){const s=new Set([nowY,anAnnee]);state.qhps.forEach(q=>{const y=+String(q.date||'').slice(0,4);if(y>2000)s.add(y)});return [...s].sort((a,b)=>b-a)}
+function renderSelects(){
+  const sa=document.getElementById('sel-annee'),sm=document.getElementById('sel-mois'),sf=document.getElementById('sel-filtre');if(!sa)return;
+  sa.innerHTML=anneesConnues().map(y=>'<option value="'+y+'"'+(y===anAnnee?' selected':'')+'>'+y+'</option>').join('');
+  sm.innerHTML='<option value=""'+(anMois===''?' selected':'')+'>📅 Année entière</option>'+MOIS_L.map((m,i)=>'<option value="'+i+'"'+(anMois===i?' selected':'')+'>'+m+'</option>').join('');
+  const opts=['(tous)'].concat(state.secteurs).concat(state.agences.map(a=>'Agence '+a));if(!opts.includes(anFiltre))anFiltre='(tous)';
+  sf.innerHTML=opts.map(o=>'<option value="'+esc(o)+'"'+(o===anFiltre?' selected':'')+'>'+(o==='(tous)'?'👥 Tout le monde':esc(o))+'</option>').join('')}
+function renderSuivi(){fermerPop();renderSelects();const box=document.getElementById('suivi-body');if(!box)return;
+  box.innerHTML=anMois===''?(anMode==='cond'?annuelConduc():annuelCollab()):renderMensuel(anAnnee,anMois)}
+function renderAnnuel(){renderSuivi()}
 function filtrer(list){
   if(anFiltre==='(tous)')return list;
   if(anFiltre.startsWith('Agence '))return list.filter(p=>(p.agence||'IDF')===anFiltre.slice(7));
   return list.filter(p=>(state.secteurs.includes(p.secteur)?p.secteur:'(sans groupe)')===anFiltre)}
+function enteteMois(y){let h='';for(let i=0;i<12;i++)h+='<th class="mo'+(y===nowY&&i===nowM?' cur':'')+'" title="Voir '+MOIS_L[i]+' '+y+'" onclick="setMois('+i+')">'+MOIS_S[i].replace('.','')+'</th>';return h}
+function qhpsDuMois(y,i){const k=mkey(y,i);return state.qhps.filter(q=>(q.date||'').slice(0,7)===k).sort((a,b)=>(a.date||'').localeCompare(b.date||''))}
+function fichesOuPresent(name,y,i){return qhpsDuMois(y,i).filter(q=>q.present&&q.present[name])}
+
+/* ---- COLLABORATEURS ---- */
 function annuelCollab(){
   const g=grouper(filtrer(state.roster.slice()));
-  let h=`<div class="card"><h2>📅 Participation ${anAnnee}</h2><p class="hint">V = présent · ✗ = absent · N/A = non compté (arrêt, congés, non concerné) — <b>touche une case pour basculer en N/A</b>. Gris = hors période. Alerte proratisée à la date : ✅ ≥ 80 % · ⚠️ en dessous · 🚫 aucun QHP.</p><div class="tbl-wrap"><table class="an"><thead><tr><th class="nom">Collaborateur</th>`;
-  for(let i=0;i<12;i++)h+=`<th>${MOIS_S[i].replace('.','')}</th>`;h+='<th>Tot</th><th>Att.</th></tr></thead><tbody>';
+  let h='<div class="card"><h2>👥 Participation aux QHP · '+anAnnee+'</h2><div class="tbl-wrap"><table class="an"><thead><tr><th class="nom">Collaborateur</th>'+enteteMois(anAnnee)+'<th>Total</th></tr></thead><tbody>';
   let any=false;
-  Object.keys(g).forEach(sec=>{const people=g[sec];if(!people.length)return;any=true;h+=`<tr><td class="sec" colspan="15">${esc(sec)} (${people.length})${sec===SUPPORT?' — 1 QHP / 4 mois':''}</td></tr>`;
+  Object.keys(g).forEach(sec=>{const people=g[sec];if(!people.length)return;any=true;h+='<tr><td class="sec" colspan="14"><span>'+esc(sec)+' ('+people.length+')'+(sec===SUPPORT?' — 1 QHP / 4 mois':'')+'</span></td></tr>';
     people.forEach(p=>{let cells='';
       for(let i=0;i<12;i++){
-        if(!moisActif(p,anAnnee,i)){cells+='<td class="g"></td>';continue}
-        const nm=esc(p.name).replace(/'/g,"\\'");
-        if(presentDansMois(p.name,anAnnee,i)){cells+=`<td class="v" onclick="toggleExclu('${nm}',${anAnnee},${i})">V</td>`}
-        else if(estExclu(p.name,anAnnee,i)){cells+=`<td class="na" onclick="toggleExclu('${nm}',${anAnnee},${i})">N/A</td>`}
-        else if(moisPasse(anAnnee,i))cells+=`<td class="x" onclick="toggleExclu('${nm}',${anAnnee},${i})">✗</td>`;
+        const nm=esc(p.name),attr=' data-n="'+nm+'" data-y="'+anAnnee+'" data-i="'+i+'" onclick="ouvrirMenuCase(event,this)"';
+        if(presentDansMois(p.name,anAnnee,i)){cells+='<td class="v"'+attr+' title="Présent — touche pour voir / retirer">V</td>';continue}
+        if(!moisActif(p,anAnnee,i)){const dep=p.dateDepart&&p.dateDepart.slice(0,7)<=mkey(anAnnee,i);cells+='<td class="g'+(dep?' dep':'')+'" title="'+(dep?'Parti en '+esc(moisLbl(p.dateDepart)):(p.dateAjout?'Arrivé en '+esc(moisLbl(p.dateAjout)):'Hors période'))+'">'+(dep?'N/A':'')+'</td>';continue}
+        if(estExclu(p.name,anAnnee,i)){cells+='<td class="na"'+attr+' title="Non compté ce mois — touche pour changer">N/A</td>'}
+        else if(moisPasse(anAnnee,i))cells+='<td class="x"'+attr+' title="Absent — touche pour l’ajouter à un QHP ou le passer en N/A">✗</td>';
         else cells+='<td class="fut">·</td>'}
       const b=bilanIndividuel(p,anAnnee);
-      h+=`<tr><td class="nom">${esc(p.name)}${agPill(p.agence)}${ICO[b.etat]}</td>${cells}<td><b>${b.tot}</b></td><td class="muted">${b.attendu||'—'}</td></tr>`})});
+      h+='<tr><td class="nom">'+esc(p.name)+(p.conducteur?' <span title="animateur">🎓</span>':'')+agPill(p.agence)+ICO[b.etat]+'</td>'+cells+'<td class="tot" title="attendu à ce jour : '+(b.attendu||'—')+'">'+b.tot+'</td></tr>'})});
   h+='</tbody></table></div>';
   if(!any)h+='<p class="hint">Aucun collaborateur.</p>';
-  h+=`<div class="row no-print" style="margin-top:10px"><button class="btn btn-ghost grow" onclick="exportCollab(${anAnnee})">⬇ Export CSV</button><button class="btn btn-ghost grow" onclick="window.print()">🖨 Imprimer</button></div></div>`;return h}
-/* ---- indicateurs conducteurs : valeur AUTO (fiches) + saisie MANUELLE ----
-   La saisie manuelle est stockee dans state.gestion sous une cle composee
-   'NOM Prenom|qhp' ou 'NOM Prenom|collab' : elle emprunte donc la synchro
-   deja en place (onglet GESTION) sans rien changer au back-end.
-   Regle : une valeur manuelle saisie prime ; sinon on prend la valeur
-   calculee sur les fiches, affichee en filigrane dans la case. */
-function qhpRealisesCond(cond,y,i){const k=mkey(y,i);
-  return state.qhps.filter(q=>(q.date||'').slice(0,7)===k&&(q.cond||'').trim()===cond).length}
-function collabSensibMois(cond,y,i){const k=mkey(y,i),vus={};
-  state.qhps.forEach(q=>{if((q.date||'').slice(0,7)!==k)return;if((q.cond||'').trim()!==cond)return;
+  h+='<div class="legende"><span><b class="lv">V</b> présent</span><span><b class="lx">✗</b> absent</span><span><b>N/A</b> non compté (arrêt, congés, parti)</span><span>· à venir</span><span>✅ ≥ 80 % de l’attendu · ⚠️ en dessous · 🚫 aucun QHP</span><span><b>Touche une case</b> pour ajouter une participation ou passer en N/A · <b>touche un mois</b> pour le détailler</span></div>';
+  h+='<div class="row no-print" style="margin-top:10px"><button class="btn btn-ghost grow" onclick="exportCollab('+anAnnee+')">⬇ Export CSV</button><button class="btn btn-ghost grow" onclick="window.print()">🖨 Imprimer</button></div></div>';return h}
+
+/* ---- le menu d'une case ---- */
+let popCible=null;
+function fermerPop(){const el=document.getElementById('popcell');if(el){el.style.display='none';el.innerHTML=''}popCible=null}
+document.addEventListener('mousedown',e=>{const el=document.getElementById('popcell');if(el&&el.style.display!=='none'&&!el.contains(e.target)&&!(e.target.closest&&e.target.closest('td.v,td.x,td.na')))fermerPop()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')fermerPop()});
+function ouvrirMenuCase(ev,td){
+  const name=td.dataset.n,y=+td.dataset.y,i=+td.dataset.i;const el=document.getElementById('popcell');
+  if(popCible===td){fermerPop();return}
+  popCible=td;const qs=qhpsDuMois(y,i),dedans=fichesOuPresent(name,y,i),dehors=qs.filter(q=>!(q.present&&q.present[name]));
+  const lq=q=>esc(frDate(q.date))+' · '+esc(q.cond||'sans animateur')+' <small>'+esc(q.chantier||'')+'</small>';
+  let h='<div class="pt">'+esc(name)+'<small>'+MOIS_L[i]+' '+y+(dedans.length?' · présent à '+dedans.length+' QHP':estExclu(name,y,i)?' · non compté (N/A)':' · absent')+'</small></div>';
+  const na=encodeURIComponent(name);
+  if(dedans.length){h+=dedans.map(q=>'<button class="q" onclick="retirerPresence(\''+q.id+'\',decodeURIComponent(\''+na+'\'))">➖ Retirer de : '+lq(q)+'</button>').join('')+'<div class="sep"></div>'}
+  if(dehors.length){h+='<button disabled style="cursor:default"><b>✅ A participé à…</b></button>'+dehors.map(q=>'<button class="q" onclick="ajouterPresence(\''+q.id+'\',decodeURIComponent(\''+na+'\'))">'+lq(q)+'</button>').join('')}
+  h+='<button onclick="nouvelleFichePour(decodeURIComponent(\''+na+'\'),'+y+','+i+')">➕ <b>Nouvelle fiche</b> ce mois, avec '+esc(name)+'</button>';
+  if(!dedans.length){h+='<div class="sep"></div><button onclick="fermerPop();toggleExclu(decodeURIComponent(\''+na+'\'),'+y+','+i+')">'+(estExclu(name,y,i)?'✗ Remettre <b>absent</b>':'⛔ Passer en <b>N/A</b> (non compté)')+'</button>'}
+  el.innerHTML=h;el.style.display='block';
+  const r=td.getBoundingClientRect();const w=el.offsetWidth||280;let x=r.left+window.scrollX;if(x+w>window.scrollX+document.documentElement.clientWidth-8)x=Math.max(8,window.scrollX+document.documentElement.clientWidth-w-8);
+  el.style.left=x+'px';el.style.top=(r.bottom+window.scrollY+4)+'px'}
+function ajouterPresence(qid,name){const q=state.qhps.find(x=>x.id===qid);if(!q)return;
+  if(q.present&&q.present[name]){toast(name+' est déjà compté sur cette fiche');fermerPop();return}   // anti-doublon
+  q.present=q.present||{};q.present[name]=true;q.maj=nowISO();save();fermerPop();renderSuivi();toast(name+' ajouté au QHP du '+frDate(q.date)+' ✓');syncAuto(q.id)}
+function retirerPresence(qid,name){const q=state.qhps.find(x=>x.id===qid);if(!q||!q.present)return;
+  if(nomRoster(q.cond)===name&&!confirm(name+' est l’animateur de cette fiche. Le retirer quand même ?'))return;
+  delete q.present[name];q.maj=nowISO();save();fermerPop();renderSuivi();toast(name+' retiré du QHP du '+frDate(q.date));syncAuto(q.id)}
+async function nouvelleFichePour(name,y,i){fermerPop();await openFiche();
+  const dernier=new Date(y,i+1,0);const d=(y===nowY&&i===nowM)?todayISO:(dernier<new Date()?dernier:new Date(y,i,1)).toISOString().slice(0,10);
+  document.getElementById('f-date').value=d;pickPres[name]=true;renderPickNames();document.getElementById('f-theme').focus()}
+
+/* ---- ANIMATEURS : une ligne par animateur ---- */
+function qhpRealisesCond(cond,y,i){const k=mkey(y,i),c=cleNomJs(cond);
+  return state.qhps.filter(q=>(q.date||'').slice(0,7)===k&&cleNomJs(q.cond)===c).length}
+function collabSensibMois(cond,y,i){const k=mkey(y,i),vus={},c=cleNomJs(cond);
+  state.qhps.forEach(q=>{if((q.date||'').slice(0,7)!==k)return;if(cleNomJs(q.cond)!==c)return;
     Object.keys(q.present||{}).forEach(n=>{if(q.present[n])vus[n]=1})});
   return Object.keys(vus).length}
-function manuelVal(key,cond,suf){const v=state.gestion[key]&&state.gestion[key][cond+'|'+suf];
-  return (v===undefined||v===null||v==='')?'':v}
-function setManuel(key,cond,suf,val){setGestion(key,cond+'|'+suf,val)}
-function valEff_(man,auto){return man!==''?+man:auto}
-
 function annuelConduc(){
-  const g=grouper(filtrer(conducteurs()));
-  let h=`<div class="card"><h2>👷 Réalisation conducteurs ${anAnnee}</h2><p class="hint">Trois indicateurs par conducteur. Chaque case est <b>pré-remplie automatiquement</b> d'après les fiches (nombre en gris) ; tape un chiffre pour la corriger, ou pour renseigner un mois sans fiche. Gris plein = hors période.<br>· <b>QHP réalisés</b> : fiches animées par ce conducteur · <b>Chantiers couv. / gérés</b> : couverts = chantiers différents avec un QHP (auto), gérés = à saisir, c'est le dénominateur du % · <b>Collab. sensibilisés</b> : personnes différentes touchées dans le mois.</p><div class="tbl-wrap"><table class="an"><thead><tr><th class="nom">Conducteur</th><th></th>`;
-  for(let i=0;i<12;i++)h+=`<th>${MOIS_S[i].replace('.','')}</th>`;h+='<th>Total</th></tr></thead><tbody>';
+  const g=grouper(filtrer(animateurs()));
+  let h='<div class="card"><h2>🎓 QHP animés · '+anAnnee+'</h2><div class="tbl-wrap"><table class="an"><thead><tr><th class="nom">Animateur</th>'+enteteMois(anAnnee)+'<th>Total</th></tr></thead><tbody>';
   let any=false;
-  Object.keys(g).forEach(sec=>{const people=g[sec];if(!people.length)return;any=true;
-    h+=`<tr><td class="sec" colspan="15">${esc(sec)} (${people.length})</td></tr>`;
-    people.forEach(p=>{
-      const nm=esc(p.name).replace(/'/g,"\\'");
-      let c1='',c2='',c3='',totQ=0,totS=0,cov=0,ger=0;
+  Object.keys(g).forEach(sec=>{const people=g[sec];if(!people.length)return;any=true;h+='<tr><td class="sec" colspan="14"><span>'+esc(sec)+' ('+people.length+')</span></td></tr>';
+    people.forEach(p=>{let cells='',tot=0;
       for(let i=0;i<12;i++){
-        if(!moisActif(p,anAnnee,i)){c1+='<td class="g"></td>';c2+='<td class="g"></td>';c3+='<td class="g"></td>';continue}
-        const key=mkey(anAnnee,i);
-        const aQ=qhpRealisesCond(p.name,anAnnee,i),mQ=manuelVal(key,p.name,'qhp');
-        totQ+=valEff_(mQ,aQ);
-        c1+=`<td class="cell"><input class="gr" type="number" min="0" inputmode="numeric" value="${mQ}" placeholder="${aQ}" onchange="setManuel('${key}','${nm}','qhp',this.value)"></td>`;
-        const aC=chantiersCouvertsCond(p.name,anAnnee,i);
-        const gv=(state.gestion[key]&&state.gestion[key][p.name]!=null)?state.gestion[key][p.name]:'';
-        if(gv!==''){ger+=+gv;cov+=Math.min(aC,+gv)}
-        const pc=(gv!==''&&+gv>0)?Math.round(Math.min(aC,+gv)/(+gv)*100):null;
-        const bg=pc===null?'':(pc>=100?'background:var(--ok-bg)':(pc>=50?'background:var(--mid-bg)':'background:var(--warn-bg)'));
-        c2+=`<td class="cell" style="${bg}"><span class="cov">${aC} couv.</span><input class="gr" type="number" min="0" inputmode="numeric" value="${gv}" placeholder="–" onchange="setGestion('${key}','${nm}',this.value)"></td>`;
-        const aS=collabSensibMois(p.name,anAnnee,i),mS=manuelVal(key,p.name,'collab');
-        totS+=valEff_(mS,aS);
-        c3+=`<td class="cell"><input class="gr" type="number" min="0" inputmode="numeric" value="${mS}" placeholder="${aS}" onchange="setManuel('${key}','${nm}','collab',this.value)"></td>`;
-      }
-      const pcAn=ger>0?Math.round(cov/ger*100):null;
-      h+=`<tr><td class="nom" rowspan="3">${esc(p.name)}${agPill(p.agence)}</td><td class="lbl">QHP réalisés</td>${c1}<td><b>${totQ||'—'}</b></td></tr>`;
-      h+=`<tr><td class="lbl">Chantiers couv. / gérés</td>${c2}<td><b>${pcAn===null?'—':pcAn+'%'}</b></td></tr>`;
-      h+=`<tr><td class="lbl">Collab. sensibilisés</td>${c3}<td><b>${totS||'—'}</b></td></tr>`;
-    })});
-  if(!any)h+='<tr><td class="nom">—</td><td colspan="14" style="text-align:left;padding:10px" class="muted">Aucun conducteur dans ce filtre.</td></tr>';
+        if(!moisActif(p,anAnnee,i)&&!qhpRealisesCond(p.name,anAnnee,i)){cells+='<td class="g"></td>';continue}
+        const n=qhpRealisesCond(p.name,anAnnee,i);tot+=n;
+        cells+='<td class="n'+(n?'':' z')+'" title="'+MOIS_L[i]+' : '+n+' QHP animé'+(n>1?'s':'')+' — touche pour voir le mois" onclick="setMois('+i+')">'+(n||(moisPasse(anAnnee,i)?'0':'·'))+'</td>'}
+      h+='<tr><td class="nom">'+esc(p.name)+agPill(p.agence)+'</td>'+cells+'<td class="tot">'+tot+'</td></tr>'})});
   h+='</tbody></table></div>';
-  h+='<p class="hint">Le total « Collab. sensibilisés » est un <b>cumul des mois</b> : une personne touchée en mars puis en juin y compte deux fois.</p>';
-  h+=`<div class="row no-print" style="margin-top:10px"><button class="btn btn-ghost grow" onclick="exportConduc(${anAnnee})">⬇ Export CSV</button><button class="btn btn-ghost grow" onclick="window.print()">🖨 Imprimer</button></div></div>`;return h}
+  if(!any)h+='<p class="hint">Aucun animateur dans ce filtre. Un animateur est un collaborateur coché « animateur » (conducteur de travaux) dans la liste.</p>';
+  h+='<div class="legende"><span>Nombre de QHP animés dans le mois (d’après les fiches : champ « Animateur »)</span><span><b>Touche un mois</b> pour voir ses QHP</span></div>';
+  h+='<div class="row no-print" style="margin-top:10px"><button class="btn btn-ghost grow" onclick="exportConduc('+anAnnee+')">⬇ Export CSV</button><button class="btn btn-ghost grow" onclick="window.print()">🖨 Imprimer</button></div></div>';return h}
 function setGestion(key,cond,val){if(!state.gestion[key])state.gestion[key]={};const n=parseInt(val);if(val===''||isNaN(n))delete state.gestion[key][cond];else state.gestion[key][cond]=n;
-  state.majDico.gestion[key+'|'+cond]=nowISO();save();renderAnnuel();syncAuto()}
+  state.majDico.gestion[key+'|'+cond]=nowISO();save();syncAuto()}
+
+/* ---- UN MOIS ---- */
+function renderMensuel(y,i){
+  const yy=String(y),mois=mkey(y,i);
+  const qs=qhpsDuMois(y,i);
+  const eff=filtrer(actifs()).filter(p=>moisActif(p,y,i)&&!estExclu(p.name,y,i));
+  const N=eff.length;
+  const vus=new Set();qs.forEach(q=>eff.forEach(p=>{if(q.present&&q.present[p.name])vus.add(p.name)}));
+  const taux=N?Math.round(vus.size/N*100):0;const ok=taux>=conf.objPart;
+  const nbExclus=filtrer(actifs()).filter(p=>moisActif(p,y,i)&&estExclu(p.name,y,i)).length;
+  let h='<div class="card no-print"><div class="mois-nav"><button class="btn btn-ghost btn-sm" onclick="setMois(\'\')">◀ Année entière</button><span class="grow"></span><button class="btn btn-ghost btn-sm" onclick="chgMois(-1)">◀</button><b>'+MOIS_L[i]+' '+yy+'</b><button class="btn btn-ghost btn-sm" onclick="chgMois(1)">▶</button></div></div>';
+  h+='<div class="kpis"><div class="kpi"><div class="v">'+qs.length+'</div><div class="l">QHP réalisés</div></div>'
+    +'<div class="kpi '+(ok?'goodbg':'warnbg')+'"><div class="v">'+taux+'%</div><div class="l">Participation ('+vus.size+'/'+N+')</div></div>'
+    +'<div class="kpi big"><div class="l" style="margin-bottom:2px">Objectif participation '+conf.objPart+'%</div><div class="bar '+(ok?'ok':'warn')+'"><i style="width:'+Math.min(100,taux)+'%"></i><span class="seuil" style="left:'+Math.min(100,conf.objPart)+'%"></span></div><div class="sub">'+(ok?'✅ Objectif atteint':'⛔ '+(conf.objPart-taux)+' pts sous l’objectif')+(nbExclus?' · '+nbExclus+' personne(s) non comptée(s) ce mois':'')+'</div></div></div>';
+  // par agence (compact)
+  const ags=state.agences.map(a=>{const l=eff.filter(p=>(p.agence||'IDF')===a);if(!l.length)return '';const v=l.filter(p=>vus.has(p.name)).length;const pc=Math.round(v/l.length*100);
+    return '<span class="pill '+(pc>=conf.objPart?'ok':pc>=50?'mid':'warn')+'" title="'+v+' vus sur '+l.length+'">'+esc(a)+' '+pc+'%</span>'}).filter(Boolean).join(' ');
+  if(ags)h+='<div class="card" style="margin-top:12px"><h2>📍 Par agence</h2><div class="row" style="gap:8px">'+ags+'</div></div>';
+  h+='<div class="card"><h2>🗂 QHP du mois ('+qs.length+')</h2>'+(qs.length?tableQhps(qs):'<p class="hint">Aucun QHP ce mois. Enregistre-le depuis l’accueil, ou touche une case du suivi annuel.</p>')+'</div>';
+  return h}
 
 /* ===== Réglages ===== */
 function renderReglages(){
@@ -904,24 +990,39 @@ function renderReglages(){
   document.getElementById('sec-list').innerHTML='<div class="tbl-wrap"><table><tbody>'+state.secteurs.map((s,i)=>`<tr><td>${esc(s)} <span class="muted small">(${state.roster.filter(p=>p.secteur===s).length})</span></td><td style="width:44px;text-align:right"><button class="btn btn-ghost btn-sm" onclick="delSecteur(${i})">🗑</button></td></tr>`).join('')+'</tbody></table></div><p class="hint">Agences : '+state.agences.join(' · ')+'</p>';
   fillSelect(document.getElementById('new-name-sec'),state.secteurs,state.secteurs[0]||'');
   fillSelect(document.getElementById('new-name-ag'),state.agences,'IDF');
-  const rf=document.getElementById('reg-filtre');const opts=['(tous)','(conducteurs)'].concat(state.secteurs).concat(state.agences.map(a=>'Agence '+a));
+  const rf=document.getElementById('reg-filtre');const opts=['(tous)','(animateurs)'].concat(state.secteurs).concat(state.agences.map(a=>'Agence '+a));
   const cur=rf.value||'(tous)';fillSelect(rf,opts,opts.includes(cur)?cur:'(tous)');
   let flt=rf.value||'(tous)';let list=state.roster;
-  if(flt==='(conducteurs)')list=state.roster.filter(p=>p.conducteur);
+  if(flt==='(animateurs)')list=state.roster.filter(p=>p.conducteur);
   else if(flt.startsWith('Agence '))list=state.roster.filter(p=>(p.agence||'IDF')===flt.slice(7));
   else if(flt!=='(tous)')list=state.roster.filter(p=>(state.secteurs.includes(p.secteur)?p.secteur:'(sans groupe)')===flt);
   const ref=rosterReferentiel();
   document.getElementById('roster-ref').style.display=ref?'':'none';document.getElementById('roster-ajout').style.display=ref?'none':'';
+  document.getElementById('roster-etat').innerHTML=etatReferentielHtml();
   const g=grouper(list);let h='';
   Object.keys(g).forEach(sec=>{h+=`<h3>${esc(sec)} (${g[sec].length})</h3><div class="tbl-wrap"><table><tbody>`;
     g[sec].forEach(p=>{const idx=state.roster.indexOf(p);
       const st=p.dateDepart?('<span class="pill warn">parti '+moisLbl(p.dateDepart)+'</span>'):(p.dateAjout?('<span class="pill mid">dès '+moisLbl(p.dateAjout)+'</span>'):'');
-      h+=`<tr><td>${esc(p.name)}${agPill(p.agence)}${p.conducteur?' <span class="pill ok">conducteur</span>':''} ${st}</td>
+      h+=`<tr><td>${esc(p.name)}${agPill(p.agence)}${p.conducteur?' <span class="pill ok">animateur</span>':''} ${st}</td>
         ${ref?'':`<td style="width:190px;text-align:right;white-space:nowrap">${p.dateDepart?'':'<button class="btn btn-ghost btn-sm" onclick="retirer('+idx+')">↩ Départ</button> '}<button class="btn btn-danger btn-sm" onclick="delName(${idx})">🗑 Supprimer</button></td>`}</tr>`});
     h+='</tbody></table></div>'});
   document.getElementById('roster-edit').innerHTML=h||'<p class="hint">Aucun collaborateur.</p>';
-  document.getElementById('ch-list').innerHTML=state.chantiers.length?('<div class="tbl-wrap"><table><thead><tr><th>Chantier</th><th>Conducteur</th><th></th></tr></thead><tbody>'+state.chantiers.map((c,i)=>`<tr><td>${esc(c.nom)}</td><td>${esc(c.cond||'—')}</td><td style="width:40px;text-align:right"><button class="btn btn-ghost btn-sm" onclick="delChantier(${i})">🗑</button></td></tr>`).join('')+'</tbody></table></div>'):'<p class="hint">Aucun chantier (ils se créent depuis les fiches).</p>'}
+  document.getElementById('ch-list').innerHTML=state.chantiers.length?('<div class="tbl-wrap"><table><thead><tr><th>Chantier</th><th>Animateur</th><th></th></tr></thead><tbody>'+state.chantiers.map((c,i)=>`<tr><td>${esc(c.nom)}</td><td>${esc(c.cond||'—')}</td><td style="width:40px;text-align:right"><button class="btn btn-ghost btn-sm" onclick="delChantier(${i})">🗑</button></td></tr>`).join('')+'</tbody></table></div>'):'<p class="hint">Aucun chantier (ils se créent depuis les fiches).</p>'}
 function rosterReferentiel(){return state.rosterSource==='referentiel'}
+/* V3 — le serveur dit où en est le branchement au Référentiel CDES (V2.4) ; la page l'explique en clair. */
+function etatReferentielHtml(){
+  if(!syncConfigure())return '';
+  const r=state.referentiel;if(!r)return '<div class="banner">ℹ️ Le script Suivi QHP n’a pas encore dit s’il est relié au Référentiel CDES : synchronise une fois (le script doit être en V2.4 ou plus).</div>';
+  const seuls=(r.seulementQhp||[]);
+  const liste=seuls.length?'<div class="banner" style="margin-top:8px">👤 <b>'+seuls.length+' personne'+(seuls.length>1?'s connues':' connue')+' du suivi QHP seulement</b> (absente'+(seuls.length>1?'s':'')+' du Référentiel, ou qhp ≠ oui) — gardée'+(seuls.length>1?'s':'')+' telle'+(seuls.length>1?'s':'')+' quelle'+(seuls.length>1?'s':'')+'. Toujours là ? Ajoute-la dans l’intranet (Collaborateurs) avec ce nom exact. Partie ? Ajoute-la avec sa date de départ.<div class="ref-liste">'+seuls.map(n=>'<span class="pill n">'+esc(n)+'</span>').join('')+'</div></div>':'';
+  switch(r.etat){
+    case 'ok':return liste;
+    case 'sans-fichier':return '<div class="banner err">⚠️ <b>Référentiel non relié</b> : le fichier <code>Referentiel.gs</code> manque dans le script Apps Script « Suivi QHP ». Tant qu’il manque, les entrées / départs saisis dans l’intranet n’arrivent pas ici.</div>';
+    case 'sans-id':return '<div class="banner err">⚠️ <b>Référentiel non relié</b> : la propriété <code>REFERENTIEL_ID</code> manque dans le script « Suivi QHP » (Paramètres du projet ▸ Propriétés du script). Tant qu’elle manque, les entrées / départs saisis dans l’intranet n’arrivent pas ici.</div>';
+    case 'illisible':return '<div class="banner err">⚠️ <b>Référentiel illisible</b> : le classeur « Référentiel CDES » n’est pas accessible au script, ou son onglet COLLABORATEURS est vide. Vérifie REFERENTIEL_ID et le partage du classeur avec le compte du script.</div>';
+    case 'desactive':return '<div class="banner">ℹ️ Liste tenue dans l’appli (propriété QHP_ROSTER_SOURCE = appli) : le Référentiel est ignoré volontairement.</div>';
+    default:return ''}
+}
 function refBloque(){if(!rosterReferentiel())return false;toast('Liste tenue dans le Référentiel CDES : modifie-la là-bas',true);return true}
 function moisLbl(iso){return MOIS_S[(+iso.slice(5,7))-1].replace('.','')+' '+iso.slice(0,4)}
 function addSecteur(){const el=document.getElementById('new-sec');const s=el.value.trim();if(!s)return;if(state.secteurs.some(x=>x.toLowerCase()===s.toLowerCase())){toast('Déjà présent',true);return}state.secteurs.push(s);delete state.tomb.secteurs[s];save();el.value='';renderReglages();toast('Groupe ajouté');syncAuto()}
@@ -942,32 +1043,17 @@ function exportJSON(){dl('sauvegarde-qhp-'+todayISO+'.json',JSON.stringify({stat
 function importJSON(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const j=JSON.parse(r.result);if(!j.state||!Array.isArray(j.state.roster))throw 0;if(!confirm('Remplacer les données actuelles ?'))return;state=Object.assign({secteurs:[],agences:['IDF','NA','BPL'],roster:[],chantiers:[],qhps:[],gestion:{},exclus:{}},j.state);if(j.conf)conf=Object.assign(conf,j.conf);save();try{localStorage.setItem(LS_CONF,JSON.stringify(conf))}catch(e){}renderReglages();renderFiches();toast('Restauré ✓')}catch(e){toast('Fichier invalide',true)}};r.readAsText(f);inp.value=''}
 function exportCollab(annee){const sep=';';let rows=[['Groupe','Agence','Collaborateur',...MOIS_L,'Total','Attendu','Etat'].map(csvCell).join(sep)];
   const g=grouper();Object.keys(g).forEach(sec=>g[sec].forEach(p=>{const cells=[];
-    for(let i=0;i<12;i++){if(!moisActif(p,annee,i)){cells.push('');continue}
-      if(presentDansMois(p.name,annee,i))cells.push('V');else if(estExclu(p.name,annee,i))cells.push('N/A');else if(moisPasse(annee,i))cells.push('X');else cells.push('')}
+    for(let i=0;i<12;i++){if(presentDansMois(p.name,annee,i)){cells.push('V');continue}if(!moisActif(p,annee,i)){cells.push(p.dateDepart&&p.dateDepart.slice(0,7)<=mkey(annee,i)?'N/A':'');continue}
+      if(estExclu(p.name,annee,i))cells.push('N/A');else if(moisPasse(annee,i))cells.push('X');else cells.push('')}
     const b=bilanIndividuel(p,annee);
     rows.push([sec,p.agence||'IDF',p.name,...cells,b.tot,b.attendu,{ok:'OK',moyen:'A SUIVRE',ko:'ALERTE',neutre:''}[b.etat]].map(csvCell).join(sep))}));
   dl('QHP-participation-'+annee+'.csv','\ufeff'+rows.join('\r\n'),'text/csv;charset=utf-8');toast('Export participation OK')}
 function exportConduc(annee){const sep=';';
-  let rows=[['Groupe','Conducteur','Indicateur',...MOIS_L,'Total'].map(csvCell).join(sep)];
-  const g=grouper(conducteurs());Object.keys(g).forEach(sec=>g[sec].forEach(p=>{
-    const q=[],cg=[],co=[];let totQ=0,totS=0,tc=0,tg=0;
-    for(let i=0;i<12;i++){
-      if(!moisActif(p,annee,i)){q.push('');cg.push('');co.push('');continue}
-      const key=mkey(annee,i);
-      const aQ=qhpRealisesCond(p.name,annee,i),mQ=manuelVal(key,p.name,'qhp');
-      const vQ=valEff_(mQ,aQ);totQ+=vQ;q.push(vQ);
-      const aC=chantiersCouvertsCond(p.name,annee,i);
-      const gv=(state.gestion[key]&&state.gestion[key][p.name]!=null)?state.gestion[key][p.name]:'';
-      if(gv!==''){tg+=+gv;tc+=Math.min(aC,+gv)}
-      cg.push(aC+' / '+(gv===''?'-':gv));
-      const aS=collabSensibMois(p.name,annee,i),mS=manuelVal(key,p.name,'collab');
-      const vS=valEff_(mS,aS);totS+=vS;co.push(vS);
-    }
-    rows.push([sec,p.name,'QHP réalisés',...q,totQ].map(csvCell).join(sep));
-    rows.push([sec,p.name,'Chantiers couv. / gérés',...cg,tg>0?Math.round(tc/tg*100)+'%':''].map(csvCell).join(sep));
-    rows.push([sec,p.name,'Collab. sensibilisés',...co,totS].map(csvCell).join(sep));
-  }));
-  dl('QHP-realisation-'+annee+'.csv','\ufeff'+rows.join('\r\n'),'text/csv;charset=utf-8');toast('Export réalisation OK')}
+  let rows=[['Groupe','Animateur','Agence',...MOIS_L,'Total'].map(csvCell).join(sep)];
+  const g=grouper(animateurs());Object.keys(g).forEach(sec=>g[sec].forEach(p=>{let tot=0;const q=[];
+    for(let i=0;i<12;i++){const n=qhpRealisesCond(p.name,annee,i);tot+=n;q.push(moisActif(p,annee,i)||n?n:'')}
+    rows.push([sec,p.name,p.agence||'IDF',...q,tot].map(csvCell).join(sep))}));
+  dl('QHP-animateurs-'+annee+'.csv','﻿'+rows.join('\r\n'),'text/csv;charset=utf-8');toast('Export animateurs OK')}
 
 /* le logo est dans js/logo.js */
 /* ===================== LISTES (data/listes.json) =====================
@@ -987,7 +1073,7 @@ async function demarrerQhp(){
 await chargerListes();
   document.getElementById('logo').src=window.__LOGO__;
   document.getElementById('logo2').src=window.__LOGO__;
-  load();document.getElementById('bilan-mois').value=new Date().toISOString().slice(0,7);renderFiches();
+  load();renderFiches();
   appliquerLienBranchement();renderAccueil();
   if(syncConfigure()){document.getElementById('sync-pill').style.display='';setTimeout(()=>syncNow(false),800);
     setInterval(()=>{if(!document.hidden&&conf.autoSync!==false)syncNow(false)},300000);
