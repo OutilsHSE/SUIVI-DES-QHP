@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#003A6E">
 <title>Suivi des QHP — CDES</title>
-<link rel="stylesheet" href="css/qhp.css?v=3.4.1">
+<link rel="stylesheet" href="css/qhp.css?v=3.4.2">
 <style>
 /* V3 (19/10/2026) — accueil en tableau, suivi annuel par défaut, cases cliquables, un seul écran Suivi. Styles V3 en fin de bloc. */
 /* V2.2.1 — trois onglets, plusieurs fiches d’un coup, certitude de lecture ; V2.2.1 : stockage local indisponible signalé, fichiers versionnés */
@@ -165,7 +165,7 @@
       <label class="f">Participation minimale mensuelle (% de l'effectif)</label><input type="number" id="obj-part" min="0" max="100" value="80" onchange="saveConf()">
       <p class="hint">Alerte individuelle proratisée à la date : ✅ ≥ 80 % de l'attendu · ⚠️ en dessous · 🚫 aucun QHP.</p></div>
     <div class="card" id="carte-rythme"><h2>📅 Rythme des QHP par collaborateur</h2>
-      <p class="small muted">Curseur allumé = <b>1 QHP tous les 4 mois</b> (administratifs, supports) : la personne <b>ne compte pas</b> dans le % de participation du mois, ici comme dans l’intranet. Par défaut : allumé pour le groupe Fonctions Support, éteint pour les autres.</p>
+      <p class="small muted">Curseur allumé = <b>1 QHP tous les 4 mois</b> (administratifs, supports) : la personne <b>ne compte pas</b> dans le % de participation d’un mois où elle n’a pas fait de QHP ; si elle en a fait un, elle compte (+1), ici comme dans l’intranet. Par défaut : allumé pour le groupe Fonctions Support, éteint pour les autres.</p>
       <div class="row" style="gap:8px;margin-top:6px"><input type="search" id="ry-cherche" class="grow" placeholder="🔎 Chercher un nom" oninput="renderRythme()"><select id="ry-groupe" onchange="renderRythme()"></select></div>
       <div id="ry-liste" style="margin-top:8px"></div></div>
     <div class="card"><h2>🚧 Chantiers connus</h2><p class="small muted">Déduits des fiches. Retire un chantier terminé si besoin.</p><div id="ch-list" style="margin-top:6px"></div></div>
@@ -318,7 +318,7 @@
 <div id="dropov"><div class="dob"><span class="ic">📎</span>Dépose ici le PDF ou la photo<span>elle sera jointe à la fiche QHP</span></div></div>
 <div id="toast"></div>
 
-<script src="js/logo.js?v=3.4.1"></script>
-<script src="js/qhp.js?v=3.4.1"></script>
+<script src="js/logo.js?v=3.4.2"></script>
+<script src="js/qhp.js?v=3.4.2"></script>
 </body>
 </html>
