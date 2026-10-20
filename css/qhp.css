@@ -137,3 +137,4 @@
 /* V3.4.5 — animateurs à corriger */
 .corr-anim{border-left:4px solid #E8720C}.corr-anim .ca-l{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
 .corr-anim .ca-t{flex:1 1 100%;font-size:14px}.corr-anim .ca-s{flex:1 1 220px;min-width:0}.corr-anim .ca-sug{flex:1 1 100%;font-size:12px;color:#146C3A}.corr-anim .ca-sug.ko{color:#9a5a00}
+.corr-anim .ca-dbl{background:#FFF6EC;border:1px solid #f0c99a;border-radius:9px;padding:8px 10px;margin:6px 0 4px;font-size:13px}
