@@ -4,7 +4,7 @@
    cases cliquables (a participé / N/A / absent) sans doublon ; l'animateur compte parmi les
    participants ; alerte « fiche en double » (même jour, même animateur) ; mois de départ = N/A ;
    « Animateur » remplace « Conducteur » ; liste des collaborateurs alignée sur le Référentiel. */
-const APP_VERSION_QHP='V3.4.4';   // 20/10/2026 — onglet Animateurs : tout collaborateur qui a animé un QHP dans l'année (même sans 🎓), animateurs inconnus signalés. V3.4.3 : téléphone : fiche d'émargement vérifiée, ligne « intervenant extérieur » sur deux lignes. V3.4.3 aussi : un nom avec apostrophe se coche et signe dans l'émargement. V3.4.2 : rythme 4 mois : compté dans le % du mois s'il a fait un QHP (+1), sinon hors %. Reprend la V3.4.1 (menu d'une case court)
+const APP_VERSION_QHP='V3.4.5';   // 20/10/2026 — « Animateurs à corriger » : un nom mal écrit corrigé sur toutes ses fiches en un clic. V3.4.4 : onglet Animateurs : tout collaborateur qui a animé un QHP dans l'année (même sans 🎓), animateurs inconnus signalés. V3.4.3 : téléphone : fiche d'émargement vérifiée, ligne « intervenant extérieur » sur deux lignes. V3.4.3 aussi : un nom avec apostrophe se coche et signe dans l'émargement. V3.4.2 : rythme 4 mois : compté dans le % du mois s'il a fait un QHP (+1), sinon hors %. Reprend la V3.4.1 (menu d'une case court)
 const LS='qhp_app_v5', LS_CONF='qhp_conf_v5';
 const EPOCH='1970-01-01T00:00:00.000Z';
 function nowISO(){return new Date().toISOString()}
@@ -1259,9 +1259,35 @@ function collabSensibMois(cond,y,i){const k=mkey(y,i),vus={},c=cleNomJs(cond);
     Object.keys(q.present||{}).forEach(n=>{if(q.present[n])vus[n]=1})});
   return Object.keys(vus).length}
 /* V3.4.3 : un collaborateur qui a animé au moins un QHP dans l'année apparaît aussi dans « Animateurs », même sans la case 🎓 */
-function animateursInconnus(y){const roster={},n={};state.roster.forEach(p=>roster[cleNomJs(p.name)]=1);
-  state.qhps.forEach(q=>{if(String(q.date||'').slice(0,4)!==String(y)||!q.cond)return;if(roster[cleNomJs(q.cond)]||nomRoster(q.cond))return;const t=String(q.cond).trim();n[t]=(n[t]||0)+1});
-  return Object.keys(n).map(t=>({t,n:n[t]}))}
+/* V3.4.5 — ANIMATEURS À CORRIGER : texte de la case « Animateur » qui n'est pas exactement un nom de la liste.
+   Pour chacun : le nombre de fiches (toutes années), une proposition, et « Corriger » qui réécrit TOUTES ces fiches. */
+function motsAnim(t){return String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z ]+/g,' ').split(' ').filter(Boolean)}
+function suggestionAnimateur(t){
+  const n=nomRoster(t);if(n)return n;
+  const w=motsAnim(t),longs=w.filter(x=>x.length>1),init=w.filter(x=>x.length===1);
+  if(!longs.length||!longs.some(x=>x.length>=4))return '';
+  const cand=state.roster.filter(p=>{const m=motsAnim(p.name);if(!longs.every(x=>m.indexOf(x)>=0))return false;
+    return init.every(i=>m.some(x=>x.charAt(0)===i))});
+  return cand.length===1?cand[0].name:''}
+function animateursACorriger(y){const n={},ex={};state.roster.forEach(p=>ex[p.name]=1);
+  state.qhps.forEach(q=>{const t=String(q.cond||'').trim();if(!t||ex[t])return;
+    const o=n[t]||(n[t]={t,n:0,an:0,dates:[]});o.n++;if(String(q.date||'').slice(0,4)===String(y))o.an++;o.dates.push(frDate(q.date))});
+  return Object.values(n).filter(o=>o.an>0).map(o=>Object.assign(o,{sug:suggestionAnimateur(o.t)})).sort((a,b)=>b.an-a.an||a.t.localeCompare(b.t,'fr'))}
+function animateursInconnus(y){return animateursACorriger(y).filter(o=>!o.sug).map(o=>({t:o.t,n:o.an}))}
+function renderCorrAnim(y){const l=animateursACorriger(y);if(!l.length)return '';
+  const opts=[...state.roster].sort((a,b)=>a.name.localeCompare(b.name,'fr'));
+  return '<div class="card corr-anim"><h2>✏️ Animateurs à corriger ('+l.length+')</h2>'
+    +'<p class="hint">Le nom écrit dans la case « Animateur » de ces fiches n’est pas exactement celui de la liste. Choisis la bonne personne puis « Corriger » : <b>toutes</b> les fiches qui portent ce texte sont corrigées et synchronisées (l’intranet suit à sa prochaine synchro). Si la personne n’est pas dans la liste, ajoute-la d’abord dans l’intranet (Entrées / départs, case « Suivi dans les QHP »).</p>'
+    +l.map((o,i)=>'<div class="ca-l"><div class="ca-t"><b>'+esc(o.t)+'</b><span class="muted"> · '+o.n+' fiche'+(o.n>1?'s':'')+' ('+esc(o.dates.slice(0,4).join(', '))+(o.dates.length>4?'…':'')+')</span></div>'
+      +'<select class="ca-s" id="ca-s-'+i+'"><option value="">— choisir la personne —</option>'+opts.map(p=>'<option'+(p.name===o.sug?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select>'
+      +'<button class="btn btn-primary btn-sm" data-t="'+esc(o.t)+'" data-i="'+i+'" onclick="corrigerAnimateur(this.dataset.t,document.getElementById(\'ca-s-\'+this.dataset.i).value)">Corriger</button>'
+      +(o.sug?'<span class="ca-sug">proposition : '+esc(o.sug)+'</span>':'<span class="ca-sug ko">aucune proposition sûre</span>')+'</div>').join('')+'</div>'}
+function corrigerAnimateur(t,nom){
+  if(!nom){toast('Choisis la personne dans la liste',true);return}
+  const l=state.qhps.filter(q=>String(q.cond||'').trim()===t);if(!l.length)return;
+  if(!confirm('Remplacer « '+t+' » par « '+nom+' » sur '+l.length+' fiche'+(l.length>1?'s':'')+' ?'))return;
+  const m=nowISO();l.forEach(q=>{q.cond=nom;q.maj=m});
+  save();renderSuivi();toast('✓ '+l.length+' fiche'+(l.length>1?'s':'')+' : animateur = '+nom);syncAuto()}
 function animateursAnnee(y){const cles={};state.qhps.forEach(q=>{if(String(q.date||'').slice(0,4)===String(y)&&q.cond)cles[cleNomJs(q.cond)]=1});
   return state.roster.filter(p=>p.conducteur||cles[cleNomJs(p.name)])}
 function annuelConduc(){
@@ -1277,10 +1303,9 @@ function annuelConduc(){
       h+='<tr><td class="nom">'+esc(p.name)+(p.conducteur?'':' <span class="r4" title="A animé un QHP mais n’est pas coché « 🎓 Encadrant chantier » (intranet ▸ Entrées / départs)">sans 🎓</span>')+agPill(p.agence)+'</td>'+cells+'<td class="tot">'+tot+'</td></tr>'})});
   h+='</tbody></table></div>';
   if(!any)h+='<p class="hint">Aucun animateur dans ce filtre. Un animateur est un collaborateur coché « 🎓 Encadrant chantier », ou qui a animé un QHP dans l’année.</p>';
-  const inconnus=animateursInconnus(anAnnee);
-  if(inconnus.length)h+='<p class="hint">⚠️ Animateur écrit sur une fiche mais absent de la liste : '+inconnus.map(x=>'<b>'+esc(x.t)+'</b> ('+x.n+')').join(', ')+' — ouvre la fiche (Historique) et choisis l’animateur dans la liste, ou ajoute la personne dans l’intranet (Entrées / départs, case « Suivi dans les QHP »).</p>';
+
   h+='<div class="legende"><span>Nombre de QHP animés dans le mois (d’après les fiches : champ « Animateur »)</span><span><b>Touche un mois</b> pour voir ses QHP</span></div>';
-  h+='<div class="row no-print" style="margin-top:10px"><button class="btn btn-ghost grow" onclick="exportConduc('+anAnnee+')">⬇ Export CSV</button><button class="btn btn-ghost grow" onclick="window.print()">🖨 Imprimer</button></div></div>';return h}
+  h+='<div class="row no-print" style="margin-top:10px"><button class="btn btn-ghost grow" onclick="exportConduc('+anAnnee+')">⬇ Export CSV</button><button class="btn btn-ghost grow" onclick="window.print()">🖨 Imprimer</button></div></div>';h+=renderCorrAnim(anAnnee);return h}
 function setGestion(key,cond,val){if(!state.gestion[key])state.gestion[key]={};const n=parseInt(val);if(val===''||isNaN(n))delete state.gestion[key][cond];else state.gestion[key][cond]=n;
   state.majDico.gestion[key+'|'+cond]=nowISO();save();syncAuto()}
 
