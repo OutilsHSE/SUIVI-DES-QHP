@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#003A6E">
 <title>Suivi des QHP — CDES</title>
-<link rel="stylesheet" href="css/qhp.css?v=3.3.4">
+<link rel="stylesheet" href="css/qhp.css?v=3.4.1">
 <style>
 /* V3 (19/10/2026) — accueil en tableau, suivi annuel par défaut, cases cliquables, un seul écran Suivi. Styles V3 en fin de bloc. */
 /* V2.2.1 — trois onglets, plusieurs fiches d’un coup, certitude de lecture ; V2.2.1 : stockage local indisponible signalé, fichiers versionnés */
@@ -37,6 +37,14 @@
 .dbl-c{border:1px solid #e3eaf1;border-radius:10px;padding:8px 10px;font-size:13px;line-height:1.45}
 .dbl-c.conseil{border-color:#146C3A;box-shadow:0 0 0 1px #146C3A inset}.dbl-c .tag{font-size:11.5px;font-weight:800;color:#146C3A}
 .dbl-c .src{font-size:11.5px;color:#5B7387}.dbl-c .btn{margin-top:6px}
+.ry-g{margin:10px 0 4px;font-weight:800;color:var(--marine,#003A6E);font-size:13.5px;display:flex;justify-content:space-between;gap:8px}
+.ry-l{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 4px;border-bottom:1px solid #edf2f6;font-size:14px}
+.ry-l .def{font-size:11.5px;color:#7b8fa3}
+.sw{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0}.sw input{opacity:0;width:0;height:0}
+.sw i{position:absolute;inset:0;border-radius:24px;background:#cfd9e3;transition:.15s;cursor:pointer}
+.sw i:before{content:'';position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.15s;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.sw input:checked+i{background:#7A4FC0}.sw input:checked+i:before{transform:translateX(18px)}
+.r4{display:inline-block;font-size:11px;font-weight:800;color:#5A3A9A;background:#f1eafb;border-radius:8px;padding:0 6px;margin-left:4px}
 .bra .pourquoi{font-size:12px;color:#9a5b00}.taux+.taux{margin-left:6px}.taux.mid{background:#fff3e0;color:#9a5b00}.taux.ko{background:#fdeceb;color:#a3231c}
 .nm.incertain{background:#fff3e0!important;outline:2px dashed #E8720C;outline-offset:-2px}
 .nondech{color:#a3231c}
@@ -57,13 +65,17 @@
 .an td.tot{font-weight:800;color:var(--marine)}
 .legende{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin:8px 2px 0}
 .legende b{font-weight:800}.legende .lv{color:var(--ok)}.legende .lx{color:var(--warn)}
-.popcell{position:absolute;z-index:60;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px rgba(0,40,77,.18);min-width:250px;max-width:330px;padding:8px;font-size:13.5px}
+.popcell{position:fixed;z-index:60;max-height:80vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px rgba(0,40,77,.18);min-width:250px;max-width:330px;padding:8px;font-size:13.5px}
 .popcell .pt{font-weight:700;color:var(--marine);padding:4px 6px 6px;border-bottom:1px solid var(--line);margin-bottom:6px}
 .popcell .pt small{display:block;font-weight:500;color:var(--muted);font-size:12px}
 .popcell button{display:flex;width:100%;text-align:left;gap:8px;align-items:center;background:none;border:none;border-radius:9px;padding:9px 8px;font-family:inherit;font-size:13.5px;cursor:pointer;color:var(--txt)}
 .popcell button:hover{background:#eef5fb}.popcell button b{color:var(--marine)}
 .popcell button.q{padding-left:22px;font-size:13px}.popcell button.q small{color:var(--muted)}
 .popcell .sep{border-top:1px dashed var(--line);margin:5px 0}
+.popcell button.pri{background:#fff3e0;font-weight:700}.popcell button.pri:hover{background:#ffe6c4}.popcell button.pri small{color:var(--muted);font-weight:500}
+.popcell .pl{display:block;font-size:12.5px;font-weight:700;color:var(--marine);padding:4px 6px 2px}
+.popcell .psel{width:100%;margin:2px 0 4px;padding:8px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;background:#fff}
+.popcell button.sec2{font-size:13px;color:var(--muted)}
 .mois-nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .mois-nav b{font-size:19px;color:var(--marine);font-family:"Barlow Condensed",Arial;min-width:150px;text-align:center}
 .anim-tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:6px;background:#fff3e0;color:#9a5b00;margin-left:6px}
@@ -136,7 +148,7 @@
         <div class="grow"><label class="f">Groupe</label><select id="new-name-sec"></select></div>
         <div class="grow" style="max-width:130px"><label class="f">Agence</label><select id="new-name-ag"></select></div>
       </div>
-      <label style="display:flex;align-items:center;gap:7px;font-size:14px;margin-top:8px"><input type="checkbox" id="new-name-cond" style="width:auto"> Animateur de QHP (conducteur de travaux)</label>
+      <label style="display:flex;align-items:center;gap:7px;font-size:14px;margin-top:8px"><input type="checkbox" id="new-name-cond" style="width:auto"> Animateur de QHP (encadrant chantier)</label>
       <button class="btn btn-primary btn-block" style="margin-top:8px" onclick="addName()">＋ Ajouter</button>
       </div>
       <label class="f" style="margin-top:14px">Filtrer la liste</label><select id="reg-filtre" onchange="renderReglages()"></select>
@@ -148,10 +160,14 @@
     <div class="card"><h2>🎯 Objectifs & alertes</h2>
       <label class="f">Cadence attendue — cas général</label>
       <select id="cad-std" onchange="saveConf()"><option value="1">1 QHP par mois</option><option value="0.5">1 QHP tous les 2 mois</option><option value="0.34">1 QHP par trimestre</option></select>
-      <label class="f">Cadence attendue — Fonctions Support</label>
+      <label class="f">Cadence attendue — rythme « 4 mois » (Fonctions Support par défaut)</label>
       <select id="cad-sup" onchange="saveConf()"><option value="0.25">1 QHP tous les 4 mois</option><option value="0.34">1 QHP par trimestre</option><option value="0.5">1 QHP tous les 2 mois</option><option value="1">1 QHP par mois</option></select>
       <label class="f">Participation minimale mensuelle (% de l'effectif)</label><input type="number" id="obj-part" min="0" max="100" value="80" onchange="saveConf()">
       <p class="hint">Alerte individuelle proratisée à la date : ✅ ≥ 80 % de l'attendu · ⚠️ en dessous · 🚫 aucun QHP.</p></div>
+    <div class="card" id="carte-rythme"><h2>📅 Rythme des QHP par collaborateur</h2>
+      <p class="small muted">Curseur allumé = <b>1 QHP tous les 4 mois</b> (administratifs, supports) : la personne <b>ne compte pas</b> dans le % de participation du mois, ici comme dans l’intranet. Par défaut : allumé pour le groupe Fonctions Support, éteint pour les autres.</p>
+      <div class="row" style="gap:8px;margin-top:6px"><input type="search" id="ry-cherche" class="grow" placeholder="🔎 Chercher un nom" oninput="renderRythme()"><select id="ry-groupe" onchange="renderRythme()"></select></div>
+      <div id="ry-liste" style="margin-top:8px"></div></div>
     <div class="card"><h2>🚧 Chantiers connus</h2><p class="small muted">Déduits des fiches. Retire un chantier terminé si besoin.</p><div id="ch-list" style="margin-top:6px"></div></div>
     <div class="card"><h2>🔄 Synchronisation Google Sheets</h2>
       <p class="small muted">Colle ici l'adresse du déploiement Apps Script. Tant que ces deux champs sont vides, l'appli fonctionne uniquement sur cet appareil et n'envoie rien nulle part.</p>
@@ -176,20 +192,20 @@
         <p class="small muted">Ces liens contiennent déjà l'adresse et le mot de passe. La personne l'ouvre une fois : c'est branché.</p>
         <div class="row">
           <button class="btn btn-ghost grow" onclick="copierBranchement(false)">🔗 Lien pour un autre PC</button>
-          <button class="btn btn-primary grow" onclick="copierBranchement(true)">📱 Lien pour un conducteur</button></div>
-        <p class="hint">Le lien conducteur branche le téléphone <b>et</b> ouvre directement la fiche d'émargement. À envoyer par SMS ou Teams, pas sur un canal public.</p>
+          <button class="btn btn-primary grow" onclick="copierBranchement(true)">📱 Lien pour un encadrant chantier</button></div>
+        <p class="hint">Le lien encadrant branche le téléphone <b>et</b> ouvre directement la fiche d'émargement. À envoyer par SMS ou Teams, pas sur un canal public.</p>
       </div></div>
     <div class="card"><h2>📥 Importer un lot de fiches</h2>
       <p class="small muted">Un fichier <code>.json</code> de fiches QHP déjà transcrites (par exemple les scans d'une année, transcrits par le service HSE). L'appli rapproche chaque nom de la liste des collaborateurs, te demande seulement ceux qu'elle ne retrouve pas, écarte les fiches déjà présentes, et peut joindre les scans.</p>
       <button class="btn btn-primary btn-block" onclick="document.getElementById('lot-json').click()">📥 Choisir le fichier du lot</button></div>
     <div class="card"><h2>✍️ Fiche d'émargement en ligne</h2>
-      <p class="small muted">Le lien ci-dessous ouvre directement la fiche d'émargement signable au doigt. À mettre en favori sur les téléphones des conducteurs, ou à coller dans un mail / QR code.</p>
+      <p class="small muted">Le lien ci-dessous ouvre directement la fiche d'émargement signable au doigt. À mettre en favori sur les téléphones des encadrants chantiers, ou à coller dans un mail / QR code.</p>
       <div class="lienbox"><input type="text" id="lien-emarg" class="grow" readonly onclick="this.select()"><button class="btn btn-ghost btn-sm" onclick="copierLien()">📋 Copier</button></div>
       <div class="row" style="margin-top:10px"><button class="btn btn-primary grow" onclick="goEmarg()">✍️ Ouvrir la fiche</button>
         <button class="btn btn-ghost grow" onclick="document.getElementById('imp-fiche').click()">⬆ Importer une fiche signée</button>
         
         <input type="file" id="imp-fiche" accept=".json,application/json" style="display:none" onchange="importFiche(this)"></div>
-      <p class="hint">Une fiche signée sur un autre téléphone s'enregistre sur CET appareil-là : le conducteur touche « 📤 Envoyer au suivi » et tu importes le fichier ici. La synchronisation automatique arrivera avec le branchement Google Sheets.</p></div>
+      <p class="hint">Une fiche signée sur un autre téléphone s'enregistre sur CET appareil-là : l'encadrant touche « 📤 Envoyer au suivi » et tu importes le fichier ici. La synchronisation automatique arrivera avec le branchement Google Sheets.</p></div>
     <div class="card"><h2>💾 Données</h2>
       <div class="row"><button class="btn btn-ghost grow" onclick="exportJSON()">⬇ Sauvegarde</button><button class="btn btn-ghost grow" onclick="document.getElementById('imp').click()">⬆ Restaurer</button><input type="file" id="imp" accept="application/json" style="display:none" onchange="importJSON(this)"></div>
       <p class="hint">Appli de test — données sur cet appareil. Pense à sauvegarder.</p></div>
@@ -302,7 +318,7 @@
 <div id="dropov"><div class="dob"><span class="ic">📎</span>Dépose ici le PDF ou la photo<span>elle sera jointe à la fiche QHP</span></div></div>
 <div id="toast"></div>
 
-<script src="js/logo.js?v=3.3.4"></script>
-<script src="js/qhp.js?v=3.3.4"></script>
+<script src="js/logo.js?v=3.4.1"></script>
+<script src="js/qhp.js?v=3.4.1"></script>
 </body>
 </html>
