@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#003A6E">
 <title>Suivi des QHP — CDES</title>
-<link rel="stylesheet" href="css/qhp.css?v=3.1">
+<link rel="stylesheet" href="css/qhp.css?v=3.3">
 <style>
 /* V3 (19/10/2026) — accueil en tableau, suivi annuel par défaut, cases cliquables, un seul écran Suivi. Styles V3 en fin de bloc. */
 /* V2.2.1 — trois onglets, plusieurs fiches d’un coup, certitude de lecture ; V2.2.1 : stockage local indisponible signalé, fichiers versionnés */
@@ -27,7 +27,9 @@
 .bn.ko{background:#fdeceb;color:#a3231c}
 .bra{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.bra .grow{flex:1}
 .taux{margin-left:auto;font-size:12px;font-weight:800;padding:2px 9px;border-radius:999px}
-.taux.ok{background:#e3f4ea;color:#146C3A}.taux.mid{background:#fff3e0;color:#9a5b00}.taux.ko{background:#fdeceb;color:#a3231c}
+.taux.ok{background:#e3f4ea;color:#146C3A}
+.bra .btn-envoi{background:#146C3A;border-color:#146C3A;color:#fff}.bra .btn-envoi[disabled]{opacity:.45}
+.bra .pourquoi{font-size:12px;color:#9a5b00}.taux+.taux{margin-left:6px}.taux.mid{background:#fff3e0;color:#9a5b00}.taux.ko{background:#fdeceb;color:#a3231c}
 .nm.incertain{background:#fff3e0!important;outline:2px dashed #E8720C;outline-offset:-2px}
 .nondech{color:#a3231c}
 /* ===== V3 ===== */
@@ -69,6 +71,16 @@
 .sheet-actions .btn-primary{font-size:16px}
 #f-groupe{width:auto;max-width:46%;padding:9px 28px 9px 10px;font-size:13.5px;appearance:none;-webkit-appearance:none;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23003A6E' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 9px center}
 .recap .chip .x{margin-left:5px;color:#a3231c;font-weight:700;cursor:pointer}
+.lot-sheet{max-width:1100px}
+.lot-t{width:100%;border-collapse:collapse;font-size:13px}.lot-t th{position:sticky;top:-16px;z-index:2}
+.lot-t td{vertical-align:top;padding:6px 7px}.lot-t td.v{color:#9a5b00;font-size:12px;max-width:280px}
+.lot-t tr.off td{opacity:.45}.lot-t tr.off td:first-child{opacity:1}
+.lot-t input[type=date]{padding:5px 6px;font-size:13px;width:140px}
+.lot-t select{padding:6px 8px;font-size:13px;min-width:220px}
+.lot-t select.vide{border-color:#C22B22;background:#fdeceb}.lot-t select.aconf{border-color:#E8720C;background:#fff8ef}
+.lot-t .sug{font-size:11.5px;color:var(--muted)}
+.lot-pill{display:inline-block;margin:2px 4px 2px 0;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:700;background:#eaf1f7;color:var(--marine)}
+.lot-pill.ko{background:#fdeceb;color:#a3231c}.lot-pill.mid{background:#fff3e0;color:#9a5b00}.lot-pill.ok{background:#e3f4ea;color:#146C3A}
 @media print{.suivi-bar,.legende,.sheet-actions{display:none!important}}
 </style>
 </head>
@@ -78,11 +90,12 @@
   <section class="view active" id="v-accueil">
     <div id="acc-etat"></div>
     <h2 class="acc-titre">Enregistrer un QHP</h2>
-    <button class="gros gros-scan no-print" onclick="document.getElementById('scan-in').click()"><span class="gi">📄</span><span class="gt"><b>Je scanne ma fiche</b><small>PDF ou photo de la fiche papier signée : l'IA remplit les champs, je vérifie et j'enregistre</small></span></button>
-    <input type="file" id="scan-in" accept="application/pdf,image/*" multiple style="display:none" onchange="scanFiche(this.files);this.value=''">
-    <button class="gros gros-lot no-print" onclick="document.getElementById('lot-in').click()"><span class="gi">📚</span><span class="gt"><b>Je dépose plusieurs fiches</b><small>Les fiches de plusieurs QHP d'un coup (une fiche = un fichier) : l'IA les lit une par une, je vérifie chacune ci-dessous</small></span></button>
-    <input type="file" id="lot-in" accept="application/pdf,image/*" multiple style="display:none" onchange="deposerPlusieurs(this.files);this.value=''">
+    <!-- V3.3 : un seul bandeau de scan, une ou plusieurs fiches : tout passe par la liste ci-dessous (certitude, Vérifier, Envoyer) -->
+    <button class="gros gros-scan no-print" onclick="document.getElementById('scan-in').click()"><span class="gi">📄</span><span class="gt"><b>Je scanne une ou plusieurs fiches</b><small>PDF ou photos des fiches signées (une fiche = un fichier) : l'IA les lit, puis pour chacune je vérifie ou j'envoie directement</small></span></button>
+    <input type="file" id="scan-in" accept="application/pdf,image/*" multiple style="display:none" onchange="deposerPlusieurs(this.files);this.value=''">
     <button class="gros gros-saisie no-print" onclick="openFiche()"><span class="gi">✏️</span><span class="gt"><b>Je saisis mon QHP</b><small>Date, chantier, thème, participants : je remplis les champs moi-même</small></span></button>
+    <p class="acc-sec no-print"><a href="#" onclick="document.getElementById('lot-json').click();return false">📥 Importer un lot de fiches déjà transcrites (fichier .json)</a></p>
+    <input type="file" id="lot-json" accept=".json,application/json" style="display:none" onchange="ouvrirLot(this.files[0]);this.value=''">
     <p class="acc-sec no-print"><a href="#" onclick="goEmarg();return false">✍️ Ou faire signer l'équipe directement sur le téléphone</a></p>
     <div id="acc-verif"></div>
     <div id="acc-fiches"></div>
@@ -156,6 +169,9 @@
           <button class="btn btn-primary grow" onclick="copierBranchement(true)">📱 Lien pour un conducteur</button></div>
         <p class="hint">Le lien conducteur branche le téléphone <b>et</b> ouvre directement la fiche d'émargement. À envoyer par SMS ou Teams, pas sur un canal public.</p>
       </div></div>
+    <div class="card"><h2>📥 Importer un lot de fiches</h2>
+      <p class="small muted">Un fichier <code>.json</code> de fiches QHP déjà transcrites (par exemple les scans d'une année, transcrits par le service HSE). L'appli rapproche chaque nom de la liste des collaborateurs, te demande seulement ceux qu'elle ne retrouve pas, écarte les fiches déjà présentes, et peut joindre les scans.</p>
+      <button class="btn btn-primary btn-block" onclick="document.getElementById('lot-json').click()">📥 Choisir le fichier du lot</button></div>
     <div class="card"><h2>✍️ Fiche d'émargement en ligne</h2>
       <p class="small muted">Le lien ci-dessous ouvre directement la fiche d'émargement signable au doigt. À mettre en favori sur les téléphones des conducteurs, ou à coller dans un mail / QR code.</p>
       <div class="lienbox"><input type="text" id="lien-emarg" class="grow" readonly onclick="this.select()"><button class="btn btn-ghost btn-sm" onclick="copierLien()">📋 Copier</button></div>
@@ -263,10 +279,20 @@
 <div class="modal m-doublon" id="m-doublon"><div class="sheet"><div class="grab"></div><h2>⚠️ Fiche en double ?</h2><div id="dbl-corps" class="banner"></div>
   <div class="row"><button class="btn btn-ghost grow" onclick="closeModal()">Annuler</button><button class="btn btn-ghost grow" id="dbl-ouvrir">Ouvrir l'existante</button><button class="btn btn-primary grow" id="dbl-garder">Enregistrer quand même</button></div></div></div>
 <div class="popcell" id="popcell" style="display:none"></div>
+<div class="modal" id="m-lot"><div class="sheet lot-sheet">
+  <div class="grab"></div><h2 id="lot-titre">📥 Import d'un lot de fiches</h2>
+  <div id="lot-resume"></div>
+  <div id="lot-noms"></div>
+  <div id="lot-scans" class="card" style="padding:10px 12px"></div>
+  <div id="lot-fiches"></div>
+  <input type="file" id="lot-dossier" webkitdirectory multiple style="display:none" onchange="lotScansChoisis(this.files);this.value=''">
+  <input type="file" id="lot-fichiers" accept="application/pdf,image/*" multiple style="display:none" onchange="lotScansChoisis(this.files);this.value=''">
+  <div class="sheet-actions"><div class="row"><button class="btn btn-ghost grow" onclick="closeModal()">Annuler</button><button class="btn btn-primary grow" id="lot-go" onclick="importerLot()">Importer</button></div></div>
+</div></div>
 <div id="dropov"><div class="dob"><span class="ic">📎</span>Dépose ici le PDF ou la photo<span>elle sera jointe à la fiche QHP</span></div></div>
 <div id="toast"></div>
 
-<script src="js/logo.js?v=3.1"></script>
-<script src="js/qhp.js?v=3.1"></script>
+<script src="js/logo.js?v=3.3"></script>
+<script src="js/qhp.js?v=3.3"></script>
 </body>
 </html>

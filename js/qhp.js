@@ -4,7 +4,7 @@
    cases cliquables (a participé / N/A / absent) sans doublon ; l'animateur compte parmi les
    participants ; alerte « fiche en double » (même jour, même animateur) ; mois de départ = N/A ;
    « Animateur » remplace « Conducteur » ; liste des collaborateurs alignée sur le Référentiel. */
-const APP_VERSION_QHP='V3.1';   // 20/10/2026 — fiche : aperçu du scan, liste compacte après lecture IA (recherche + menu groupe/agence), boutons toujours visibles
+const APP_VERSION_QHP='V3.3';   // 20/10/2026 — un seul bandeau « Je scanne une ou plusieurs fiches » : toute fiche scannée passe par la liste (certitude, Vérifier, Envoyer)
 const LS='qhp_app_v5', LS_CONF='qhp_conf_v5';
 const EPOCH='1970-01-01T00:00:00.000Z';
 function nowISO(){return new Date().toISOString()}
@@ -82,12 +82,9 @@ function renderAccueil(){const b=document.getElementById('acc-etat');if(!b)retur
   b.innerHTML=syncConfigure()?'':'<div class="banner">🔌 <b>Appareil non branché.</b> Ouvre le Suivi des QHP depuis la tuile de l\'intranet HSE : la lecture automatique des fiches et l\'envoi au suivi seront activés. En attendant, ce que tu saisis reste sur cet appareil.</div>'}
 function iaEtat(genre,txt){const b=document.getElementById('f-ia-etat');if(!b)return;
   b.innerHTML=txt?'<div class="banner '+(genre==='ok'?'ok':genre==='err'?'err':genre==='run'?'run':'')+'">'+txt+'</div>':''}
-async function scanFiche(files){if(!files||!files.length)return;files=Array.from(files);   // copie : le champ fichier est vidé juste après l'appel
-  await openFiche();document.getElementById('m-fiche-title').textContent='Fiche scannée';
-  ficheCompacte=true;renderPickNames();
-  await attachFiles(files);
-  if(syncConfigure())lireFicheIA();
-  else iaEtat('warn','🔌 Lecture automatique indisponible : cet appareil n\'est pas branché. La fiche est jointe ; remplis les champs à la main, ou ouvre l\'outil depuis l\'intranet HSE.')}
+/* V3.3 — plus d'écran « une seule fiche » : une ou plusieurs fiches scannées (bouton ou glisser-déposer)
+   vont toutes dans la liste « Fiches scannées » (certitude, Vérifier, Envoyer). */
+function scanFiche(files){return deposerPlusieurs(files)}
 
 /* ===== Fiches ===== */
 function renderFiches(){const box=document.getElementById('fiches-list');const list=[...state.qhps].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
@@ -245,12 +242,14 @@ async function saveFiche(force){const date=document.getElementById('f-date').val
   let q;if(editId)q=state.qhps.find(x=>x.id===editId);else{q={id:uid()};state.qhps.push(q)}
   q.date=date;q.theme=theme;q.chantier=document.getElementById('f-chantier').value.trim();q.cond=document.getElementById('f-cond').value.trim();
   q.remontees=document.getElementById('f-remontees').value.trim();q.present=present;q.maj=nowISO();
-  if(q.chantier){const ex=state.chantiers.find(c=>c.nom.toLowerCase()===q.chantier.toLowerCase());if(ex){ex.nom=q.chantier;if(q.cond)ex.cond=q.cond;ex.maj=nowISO()}else state.chantiers.push({id:uid(),nom:q.chantier,cond:q.cond||'',maj:nowISO()})}
+  majChantier(q);
   if(Array.isArray(piecesPending)){await piecesPut(q.id,piecesPending);
     q.pieces=piecesPending.map(p=>({name:p.name,type:p.type}));q.hasPdf=piecesPending.length>0;q.pdfName=piecesPending.length?piecesPending[0].name:''}
   if(brouillonOuvert){const bid=brouillonOuvert;state.brouillons=brouillons().filter(x=>x.id!==bid);pdfDel('br_'+bid);brouillonOuvert=null}
   save();closeModal();renderFiches();renderAccueil();toast(editId?'Fiche mise à jour ✓':'Fiche enregistrée ✓');
   syncAuto(q.id)}
+function majChantier(q){if(!q.chantier)return;const ex=state.chantiers.find(c=>c.nom.toLowerCase()===q.chantier.toLowerCase());
+  if(ex){ex.nom=q.chantier;if(q.cond)ex.cond=q.cond;ex.maj=nowISO()}else state.chantiers.push({id:uid(),nom:q.chantier,cond:q.cond||'',maj:nowISO()})}
 function deleteFiche(){if(!editId)return;if(!confirm('Supprimer cette fiche QHP ?'))return;pdfDel(editId);pdfDel('sig_'+editId);
   state.tomb.qhps[editId]=nowISO();state.qhps=state.qhps.filter(x=>x.id!==editId);save();closeModal();renderFiches();toast('Fiche supprimée');syncAuto()}
 async function openDetail(id){const q=state.qhps.find(x=>x.id===id);if(!q)return;
@@ -526,7 +525,7 @@ function appliquerExtrait(e){
 
 /* ===== V2.2 — PLUSIEURS QHP D'UN COUP =====
    On dépose les fiches de plusieurs QHP (une fiche = un fichier). Chaque fichier est
-   rangé sur l'appareil, lu par l'IA l'un après l'autre, et attend dans « À vérifier » :
+   rangé sur l'appareil, lu par l'IA l'un après l'autre, et attend dans « Fiches scannées » :
    on ouvre, on corrige, on enregistre. Rien n'est enregistré sans vérification. */
 let lectureEnCours=false, brouillonOuvert=null;
 function brouillons(){if(!Array.isArray(state.brouillons))state.brouillons=[];return state.brouillons}
@@ -569,7 +568,7 @@ async function lancerLectures(){
   }finally{lectureEnCours=false}
 }
 function relireBrouillon(id){const b=brouillons().find(x=>x.id===id);if(!b)return;b.etat='attente';b.erreur='';save();renderBrouillons();lancerLectures()}
-function retirerBrouillon(id){if(!confirm('Retirer cette fiche de la liste « À vérifier » ? (rien n’est enregistré)'))return;
+function retirerBrouillon(id){if(!confirm('Retirer cette fiche de la liste ? (rien n’est enregistré)'))return;
   state.brouillons=brouillons().filter(x=>x.id!==id);pdfDel('br_'+id);save();renderBrouillons()}
 async function ouvrirBrouillon(id){
   const b=brouillons().find(x=>x.id===id);if(!b)return;
@@ -586,7 +585,7 @@ function renderBrouillons(){
   if(!lectureEnCours&&l.some(x=>x.etat==='lecture')){l.forEach(x=>{if(x.etat==='lecture')x.etat='attente'});setTimeout(lancerLectures,300)}
   if(!l.length){box.innerHTML='';return}
   const enAtt=l.filter(x=>x.etat==='attente'||x.etat==='lecture').length;
-  box.innerHTML='<h2 class="acc-titre">À vérifier <span class="nbv">'+l.length+'</span>'+(enAtt?' <small class="muted">· '+enAtt+' en lecture…</small>':'')+'</h2>'
+  box.innerHTML='<h2 class="acc-titre">Fiches scannées <span class="nbv">'+l.length+'</span>'+(enAtt?' <small class="muted">· '+enAtt+' en lecture…</small>':'')+'</h2>'
     +'<div class="brl">'+l.map(b=>{
       const e=b.extrait||{}, t=b.etat==='pret'?tauxLecture(e):null;
       const c=e.certitudes||{};
@@ -595,15 +594,45 @@ function renderBrouillons(){
       const nr=(e.nonReconnus||[]).map(n=>'<span class="bn ko" title="non déchiffré">'+esc(n)+'</span>').join('');
       return '<div class="brc '+b.etat+'">'
         +'<div class="brh"><b>'+(e.date?esc(frDate(e.date)):'Date ?')+'</b> · '+esc(e.chantier||'chantier ?')+(e.animateur?' · '+esc(e.animateur):'')
-        +(t!==null?'<span class="taux '+classeTaux(t)+'">lecture '+t+' %</span>':'')
+        +(t!==null?'<span class="taux '+classeTaux(t)+'" title="part des noms lus avec certitude">certitude '+t+' %</span>':'')
         +(b.etat==='pret'&&doublonFiche(e.date,e.animateur,null)?'<span class="taux ko" title="une fiche existe déjà ce jour-là pour cet animateur">⚠️ doublon ?</span>':'')+'</div>'
         +'<div class="brt">'+(b.etat==='attente'?'⏳ En attente de lecture':b.etat==='lecture'?'🤖 Lecture en cours…':b.etat==='erreur'?'⚠️ Lecture impossible : '+esc(b.erreur||'?'):esc(e.theme||'(thème non lu)'))+'</div>'
         +(b.etat==='pret'?'<div class="brn">'+noms+amb+nr+(e.illisibles?'<span class="bn ko">'+e.illisibles+' illisible'+(e.illisibles>1?'s':'')+'</span>':'')+'</div>':'')
         +'<div class="bra"><span class="small muted">📎 '+esc(b.nom)+'</span><span class="grow"></span>'
         +(b.etat==='erreur'?'<button class="btn btn-ghost btn-sm" onclick="relireBrouillon(\''+b.id+'\')">↻ Relire</button>':'')
         +'<button class="btn btn-ghost btn-sm" onclick="retirerBrouillon(\''+b.id+'\')">🗑</button>'
-        +'<button class="btn btn-primary btn-sm" '+(b.etat==='attente'||b.etat==='lecture'?'disabled':'')+' onclick="ouvrirBrouillon(\''+b.id+'\')">Vérifier et enregistrer</button></div></div>'}).join('')+'</div>';
+        +(b.etat==='pret'&&manqueEnvoi(e)?'<span class="pourquoi">'+esc(manqueEnvoi(e))+' → Vérifier</span>':'')
+        +'<button class="btn btn-ghost btn-sm" '+(b.etat==='lecture'||(b.etat==='attente'&&syncConfigure())?'disabled':'')+' data-id="'+esc(b.id)+'" onclick="ouvrirBrouillon(this.dataset.id)">🔍 Vérifier</button>'
+        +'<button class="btn btn-sm btn-envoi" '+(b.etat!=='pret'||manqueEnvoi(e)?'disabled':'')+' data-id="'+esc(b.id)+'" onclick="envoyerBrouillon(this.dataset.id)">✅ Envoyer</button></div></div>'}).join('')+'</div>';
 }
+/* V3.3 — ENVOYER une fiche lue sans l'ouvrir : on enregistre ce que l'IA a lu (noms reconnus,
+   animateur compté présent, scan joint), avec confirmation s'il reste des doutes. Doublon même jour
+   même animateur : même fenêtre que la saisie. « Vérifier » ouvre la fiche pré-remplie comme avant. */
+function manqueEnvoi(e){e=e||{};if(!e.date||!/^\d{4}-\d{2}-\d{2}$/.test(e.date))return 'date non lue';if(!String(e.theme||'').trim())return 'thème non lu';return ''}
+function doutesLecture(e){const c=e.certitudes||{},d=[];const inc=Object.keys(c).filter(n=>c[n]<85).length;
+  if(inc)d.push(inc+' nom'+(inc>1?'s':'')+' rattaché'+(inc>1?'s':'')+' avec un doute');
+  if((e.ambigus||[]).length)d.push((e.ambigus.length)+' nom'+(e.ambigus.length>1?'s':'')+' à trancher (non comptés)');
+  if((e.nonReconnus||[]).length)d.push(e.nonReconnus.length+' nom'+(e.nonReconnus.length>1?'s':'')+' non déchiffré'+(e.nonReconnus.length>1?'s':'')+' (non comptés)');
+  if(e.illisibles)d.push(e.illisibles+' mot'+(e.illisibles>1?'s':'')+' illisible'+(e.illisibles>1?'s':''));
+  return d}
+async function envoyerBrouillon(id,force){
+  const b=brouillons().find(x=>x.id===id);if(!b||b.etat!=='pret')return;const e=b.extrait||{};
+  const m=manqueEnvoi(e);if(m){toast(m.charAt(0).toUpperCase()+m.slice(1)+' : ouvre la fiche avec « Vérifier »',true);return}
+  if(!force){
+    const dbl=doublonFiche(e.date,e.animateur||'',null);
+    if(dbl){demanderDoublon(dbl,()=>envoyerBrouillon(id,true),()=>openFiche(dbl.id));return}
+    const d=doutesLecture(e),t=tauxLecture(e);
+    if(d.length&&!confirm('Certitude de lecture : '+t+' %\n- '+d.join('\n- ')+'\n\nEnvoyer quand même ? (sinon : Annuler, puis « Vérifier »)'))return}
+  const present={};(e.noms||[]).forEach(n=>{if(state.roster.some(p=>p.name===n))present[n]=true});
+  const an=nomRoster(e.animateur);if(an)present[an]=true;   // l'animateur participe
+  const q={id:uid(),date:e.date,theme:String(e.theme).trim(),chantier:String(e.chantier||'').trim(),cond:String(e.animateur||'').trim(),
+    remontees:String(e.remontees||'').trim(),present,externes:[],source:'scan',maj:nowISO()};
+  const v=await pdfGet('br_'+id);const items=(v&&v.items)?v.items.slice():[];
+  if(items.length){await piecesPut(q.id,items);q.pieces=items.map(p=>({name:p.name,type:p.type}));q.hasPdf=true;q.pdfName=items[0].name}
+  state.qhps.push(q);majChantier(q);
+  state.brouillons=brouillons().filter(x=>x.id!==id);pdfDel('br_'+id);
+  save();renderFiches();renderAccueil();toast('QHP du '+frDate(q.date)+' envoyé ✓');syncAuto(q.id)}
+
 /* V3 — l'accueil montre un TABLEAU simple des derniers QHP : date, animateur, chantier,
    participants, sujets. Un conducteur y voit sa fiche apparaître ; une ligne s'ouvre au clic. */
 const ACC_NB=10;
@@ -640,6 +669,139 @@ function demanderDoublon(q,surGarder,surOuvrir){
   document.getElementById('dbl-garder').onclick=()=>{closeModal();surGarder()};
   document.getElementById('dbl-ouvrir').onclick=()=>{closeModal();surOuvrir()};
   document.getElementById('m-doublon').classList.add('open')}
+
+/* ============================================================================
+   V3.2 — IMPORT D'UN LOT DE FICHES TRANSCRITES (fichier JSON « qhp-lot »)
+   Les scans d'une année, transcrits une fois par le service HSE, entrent d'un coup :
+   · chaque nom lu est rapproché de la liste des collaborateurs (mêmes mots, accents, ordre
+     et majuscules indifférents ; une ou deux lettres d'écart ; nom seul → les personnes de ce
+     nom). Seuls les noms non retrouvés sont demandés, UNE fois ; le choix est retenu sur cet
+     appareil pour les lots suivants (qhp_alias_v1) ;
+   · une fiche déjà présente (même jour, même animateur) est décochée d'office ;
+   · une fiche sans date reste décochée tant qu'on ne lui en donne pas une ;
+   · les scans peuvent être joints (dossier ou fichiers), rattachés par leur nom de fichier.
+   ============================================================================ */
+const CLE_ALIAS='qhp_alias_v1';
+let lotEnCours=null, lotScans={};
+function aliasLire(){try{return JSON.parse(localStorage.getItem(CLE_ALIAS)||'{}')||{}}catch(e){return {}}}
+function aliasEcrire(a){try{localStorage.setItem(CLE_ALIAS,JSON.stringify(a))}catch(e){}}
+function distLev(a,b){if(a===b)return 0;const m=a.length,n=b.length;if(!m||!n)return Math.max(m,n);let prev=Array.from({length:n+1},(_,j)=>j);
+  for(let i=1;i<=m;i++){const cur=[i];for(let j=1;j<=n;j++)cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));prev=cur}return prev[n]}
+/* rapprochement d'un nom lu : {sur: nom de la liste | '', props: [noms proposés]} */
+function rapprocherNomLot(lu){
+  const k=cleNomJs(lu);if(!k)return {sur:'',props:[]};
+  const r=state.roster.map(p=>({n:p.name,k:cleNomJs(p.name)}));
+  const ex=r.filter(x=>x.k===k);if(ex.length===1)return {sur:ex[0].n,props:[],exact:true};
+  const mots=k.split(' ').filter(w=>w.length>=2);
+  const motOk=(w,mk)=>mk.some(m=>m===w||(w.length>=5&&distLev(w,m)<=1));
+  // tous les mots lus (prénom absent, initiale ignorée) se retrouvent dans le nom de la liste
+  const cont=r.filter(x=>{const mk=x.k.split(' ');return mots.length&&mots.every(w=>motOk(w,mk))});
+  const flou=r.map(x=>({n:x.n,d:distLev(x.k,k)})).filter(x=>x.d<=2).sort((a,b)=>a.d-b.d);
+  const props=[...new Set(cont.map(x=>x.n).concat(flou.map(x=>x.n)))];
+  if(cont.length===1&&mots.length>=2)return {sur:cont[0].n,props};          // ex. « CROIZIER Loïc » → « CROIZER Loïc »
+  if(!cont.length&&flou.length===1)return {sur:flou[0].n,props};             // une ou deux lettres d'écart, un seul candidat
+  if(cont.length===1&&mots.length===1)return {sur:'',props,seul:cont[0].n}; // nom seul : proposé, à confirmer
+  return {sur:'',props};
+}
+function lotNoms(){const c={};(lotEnCours.fiches||[]).forEach(f=>{(f.participants||[]).concat(f.animateur?[f.animateur]:[]).forEach(n=>{n=String(n||'').trim();if(n)c[n]=(c[n]||0)+1})});return c}
+/* résolution courante d'un nom lu : choix fait dans l'écran > choix retenu (alias) > rapprochement sûr */
+function resoudreNom(lu){const ch=lotEnCours.choix[lu];if(ch!==undefined)return ch;const a=aliasLire()[lu];if(a&&(a.startsWith('__')||state.roster.some(p=>p.name===a)))return a;return lotEnCours.rap[lu].sur||''}
+async function ouvrirLot(file){
+  if(!file)return;let j;
+  try{j=JSON.parse(await file.text())}catch(e){toast('Fichier illisible (JSON attendu)',true);return}
+  if(!j||j.type!=='qhp-lot'||!Array.isArray(j.fiches)){toast('Ce fichier n’est pas un lot de fiches QHP',true);return}
+  if(!state.roster.length){toast('La liste des collaborateurs est vide : synchronise d’abord',true);return}
+  lotEnCours={source:j.source||file.name,fiches:j.fiches.map(f=>Object.assign({},f)),choix:{},rap:{},coche:{}};
+  Object.keys(lotNoms()).forEach(n=>lotEnCours.rap[n]=rapprocherNomLot(n));
+  lotEnCours.fiches.forEach(f=>{f.statut=statutFicheLot(f);lotEnCours.coche[f.ref]=f.statut==='ok'});
+  lotScans={};
+  document.getElementById('lot-titre').textContent='📥 Import — '+lotEnCours.source;
+  renderLot();document.getElementById('m-lot').classList.add('open');
+}
+function animateurLot(f){const r=f.animateur?resoudreNom(f.animateur):'';return (r&&!r.startsWith('__'))?r:(f.animateur||'')}
+function statutFicheLot(f){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(f.date||''))return 'sansdate';
+  if(state.qhps.some(q=>q.lotRef&&q.lotRef===f.ref))return 'deja';
+  const d=doublonFiche(f.date,animateurLot(f),null);if(d)return 'doublon';
+  return 'ok'}
+function renderLot(){
+  const L=lotEnCours,noms=lotNoms(),aDemander=Object.keys(noms).filter(n=>!(L.rap[n].exact)).sort((a,b)=>a.localeCompare(b,'fr'));
+  const nonRes=aDemander.filter(n=>!resoudreNom(n)).length;
+  L.fiches.forEach(f=>{const st=statutFicheLot(f);if(st!==f.statut){f.statut=st;L.coche[f.ref]=st==='ok'}});
+  const nb=L.fiches.filter(f=>L.coche[f.ref]).length;
+  const cpt=st=>L.fiches.filter(f=>f.statut===st).length;
+  document.getElementById('lot-resume').innerHTML='<p><span class="lot-pill">'+L.fiches.length+' fiches</span>'
+    +(cpt('doublon')+cpt('deja')?'<span class="lot-pill mid">'+(cpt('doublon')+cpt('deja'))+' déjà dans le suivi</span>':'')
+    +(cpt('sansdate')?'<span class="lot-pill ko">'+cpt('sansdate')+' sans date</span>':'')
+    +'<span class="lot-pill ok">'+(Object.keys(noms).length-aDemander.length)+' noms retrouvés tels quels</span>'
+    +(aDemander.length?'<span class="lot-pill '+(nonRes?'ko':'ok')+'">'+aDemander.length+' noms à vérifier'+(nonRes?' · '+nonRes+' à choisir':'')+'</span>':'')+'</p>';
+  // --- noms
+  const opts=state.roster.map(p=>p.name).sort((a,b)=>a.localeCompare(b,'fr'));
+  let h='';
+  if(aDemander.length){
+    h+='<h3 style="margin:10px 0 6px;color:var(--marine)">👤 Noms à vérifier ('+aDemander.length+')</h3><p class="hint">Rouge = à choisir. Orange = proposé par l’appli (une ou deux lettres d’écart, ou un seul nom possible) : vérifie d’un coup d’œil. Ton choix est retenu pour les lots suivants.</p>'
+      +'<div class="tbl-wrap" style="max-height:44vh;overflow:auto"><table class="lot-t"><thead><tr><th>Nom lu sur les fiches</th><th style="text-align:center">Fiches</th><th>Dans la liste des collaborateurs</th></tr></thead><tbody>';
+    aDemander.forEach(n=>{const v=resoudreNom(n),rp=L.rap[n],props=rp.props||[];
+      const auto=v&&L.choix[n]===undefined&&!aliasLire()[n];   // proposé par l'appli, pas encore confirmé
+      const sel='<select class="'+(v?(auto?'aconf':''):'vide')+'" data-lu="'+esc(n)+'" onchange="lotChoix(this)" title="'+(auto?'Proposé par l’appli : confirme ou change':'')+'">'
+        +'<option value="">— à choisir —</option>'
+        +(props.length?'<optgroup label="Proposés">'+props.map(o=>'<option value="'+esc(o)+'"'+(o===v?' selected':'')+'>★ '+esc(o)+'</option>').join('')+'</optgroup>':'')
+        +'<optgroup label="Autres"><option value="__ext"'+(v==='__ext'?' selected':'')+'>Extérieur / intérim (garder le nom)</option><option value="__ignore"'+(v==='__ignore'?' selected':'')+'>Ne pas compter</option>'
+        +opts.filter(o=>!props.includes(o)).map(o=>'<option value="'+esc(o)+'"'+(o===v?' selected':'')+'>'+esc(o)+'</option>').join('')+'</optgroup></select>';
+      h+='<tr><td><b>'+esc(n)+'</b>'+(rp.seul&&!v?'<div class="sug">nom seul : '+esc(rp.seul)+' ?</div>':'')+'</td><td style="text-align:center">'+noms[n]+'</td><td>'+sel+'</td></tr>'});
+    h+='</tbody></table></div>';
+  }
+  document.getElementById('lot-noms').innerHTML=h;
+  // --- scans
+  const nScans=L.fiches.filter(f=>lotScans[f.fichier]).length;
+  document.getElementById('lot-scans').innerHTML='<b>📎 Joindre les scans</b> <span class="muted small">(facultatif — rattachés par nom de fichier)</span>'
+    +' <button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'lot-dossier\').click()">📁 Dossier</button> <button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'lot-fichiers\').click()">📂 Fichiers</button>'
+    +(nScans?' <span class="lot-pill ok">'+nScans+' scan'+(nScans>1?'s':'')+' rattaché'+(nScans>1?'s':'')+'</span>':'');
+  // --- fiches
+  const lib={ok:'',doublon:'déjà dans le suivi (même jour, même animateur)',deja:'déjà importée',sansdate:'date à renseigner'};
+  h='<h3 style="margin:14px 0 6px;color:var(--marine)">🗂 Fiches ('+L.fiches.length+')</h3><div class="tbl-wrap"><table class="lot-t"><thead><tr><th><input type="checkbox" onchange="lotTout(this.checked)" title="Tout cocher"></th><th>Date</th><th>Chantier</th><th>Animateur</th><th style="text-align:center">Part.</th><th>Thème</th><th>À vérifier</th></tr></thead><tbody>';
+  L.fiches.slice().sort((a,b)=>(a.date||'9').localeCompare(b.date||'9')).forEach(f=>{
+    const parts=(f.participants||[]).map(resoudreNom),ok=parts.filter(v=>v&&!v.startsWith('__')).length,ext=parts.filter(v=>v==='__ext').length+(f.externes||[]).length;
+    h+='<tr class="'+(L.coche[f.ref]?'':'off')+'"><td><input type="checkbox" data-ref="'+esc(f.ref)+'" '+(L.coche[f.ref]?'checked':'')+(f.statut==='deja'?' disabled':'')+' onchange="lotCoche(this)"></td>'
+      +'<td><input type="date" value="'+esc(f.date||'')+'" data-ref="'+esc(f.ref)+'" onchange="lotDate(this)"><div class="sug">'+esc(f.ref)+'</div></td>'
+      +'<td>'+esc(f.chantier||'')+'</td><td>'+esc(animateurLot(f))+'</td>'
+      +'<td style="text-align:center" title="'+ok+' collaborateur(s) retrouvé(s)'+(ext?', '+ext+' extérieur(s)':'')+'"><b>'+ok+'</b>'+(ext?'<span class="sug"> +'+ext+'</span>':'')+'<span class="sug">/'+((f.participants||[]).length+(f.externes||[]).length)+'</span></td>'
+      +'<td>'+esc(f.theme||'')+'</td><td class="v">'+(f.statut!=='ok'?'<b>'+esc(lib[f.statut])+'</b><br>':'')+esc(f.aVerifier||'')+'</td></tr>'});
+  h+='</tbody></table></div>';
+  document.getElementById('lot-fiches').innerHTML=h;
+  const go=document.getElementById('lot-go');go.textContent='✅ Importer '+nb+' fiche'+(nb>1?'s':'');go.disabled=!nb;
+}
+function lotChoix(sel){lotEnCours.choix[sel.dataset.lu]=sel.value;renderLot()}
+function lotCoche(cb){lotEnCours.coche[cb.dataset.ref]=cb.checked;renderLot()}
+function lotTout(v){lotEnCours.fiches.forEach(f=>{if(f.statut!=='deja'&&(f.statut!=='sansdate'||!v))lotEnCours.coche[f.ref]=v&&f.statut!=='sansdate'});renderLot()}
+function lotDate(inp){const f=lotEnCours.fiches.find(x=>x.ref===inp.dataset.ref);if(!f)return;f.date=inp.value;f.statut='';renderLot()}
+function lotScansChoisis(files){Array.from(files||[]).forEach(fi=>{lotScans[fi.name]=fi});const n=lotEnCours.fiches.filter(f=>lotScans[f.fichier]).length;toast(n+' scan(s) rattaché(s) sur '+lotEnCours.fiches.length);renderLot()}
+async function importerLot(){
+  const L=lotEnCours;if(!L)return;
+  const choisis=L.fiches.filter(f=>L.coche[f.ref]&&/^\d{4}-\d{2}-\d{2}$/.test(f.date||''));
+  if(!choisis.length){toast('Aucune fiche cochée',true);return}
+  const aChoisir=Object.keys(lotNoms()).filter(n=>!L.rap[n].exact&&!resoudreNom(n)&&choisis.some(f=>(f.participants||[]).includes(n)||f.animateur===n));
+  if(aChoisir.length&&!confirm(aChoisir.length+' nom(s) encore « à choisir » ne seront pas comptés :\n'+aChoisir.slice(0,10).map(n=>'· '+n).join('\n')+(aChoisir.length>10?'\n…':'')+'\n\nImporter quand même ?'))return;
+  // mémoriser les choix faits pour les lots suivants
+  const al=aliasLire();Object.keys(L.choix).forEach(n=>{if(L.choix[n])al[n]=L.choix[n];else delete al[n]});aliasEcrire(al);
+  const go=document.getElementById('lot-go');go.disabled=true;go.textContent='⏳ Import…';
+  let n=0,scans=0,tropLourds=0;const t=nowISO();
+  for(const f of choisis){
+    const present={},externes=(f.externes||[]).map(e=>({name:e.name||'',soc:e.soc||''}));
+    (f.participants||[]).forEach(lu=>{const v=resoudreNom(lu);if(!v||v==='__ignore')return;if(v==='__ext'){externes.push({name:lu,soc:''});return}present[v]=true});
+    const cond=animateurLot(f);if(cond&&state.roster.some(p=>p.name===cond))present[cond]=true;   // l'animateur participe
+    const q={id:uid(),date:f.date,theme:f.theme||'(thème non lu)',chantier:f.chantier||'',cond,remontees:f.remontees||'',present,externes,
+      pieces:[],hasPdf:false,pdfName:'',maj:t,source:'import',lotRef:f.ref};
+    const fi=lotScans[f.fichier];
+    if(fi){try{const isImg=(fi.type||'').indexOf('image/')===0;const data=isImg?await compressImage(fi):await readData(fi);
+      if(data.length>4200000)tropLourds++;else{const pc={name:fi.name,type:isImg?'image/jpeg':'application/pdf',data};await piecesPut(q.id,[pc]);q.pieces=[{name:pc.name,type:pc.type}];q.hasPdf=true;q.pdfName=pc.name;scans++;if(syncFile.indexOf(q.id)<0)syncFile.push(q.id)}}catch(e){}}
+    state.qhps.push(q);n++;
+    if(q.chantier){const ex=state.chantiers.find(c=>c.nom.toLowerCase()===q.chantier.toLowerCase());if(!ex)state.chantiers.push({id:uid(),nom:q.chantier,cond:q.cond||'',maj:t})}
+  }
+  save();closeModal();lotEnCours=null;renderAccueil();renderFiches();
+  toast('✅ '+n+' fiche'+(n>1?'s importées':' importée')+(scans?' · '+scans+' scan(s) joint(s), envoi en arrière-plan':'')+(tropLourds?' · '+tropLourds+' scan(s) trop lourd(s) (> 3 Mo) non joint(s)':''));
+  syncAuto();
+}
 
 /* ===== CANAL 3 : fiche d'émargement HTML ===== */
 let emargPick={},emargExt=[],emargSigs={},emargYN={risques:null,formes:null,nouvel:null,accueil:null,epi:null};
