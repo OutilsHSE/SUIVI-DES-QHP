@@ -4,7 +4,7 @@
    cases cliquables (a participé / N/A / absent) sans doublon ; l'animateur compte parmi les
    participants ; alerte « fiche en double » (même jour, même animateur) ; mois de départ = N/A ;
    « Animateur » remplace « Conducteur » ; liste des collaborateurs alignée sur le Référentiel. */
-const APP_VERSION_QHP='V3.4.2';   // 20/10/2026 — rythme 4 mois : compté dans le % du mois s'il a fait un QHP (+1), sinon hors %. Reprend la V3.4.1 (menu d'une case court)
+const APP_VERSION_QHP='V3.4.4';   // 20/10/2026 — onglet Animateurs : tout collaborateur qui a animé un QHP dans l'année (même sans 🎓), animateurs inconnus signalés. V3.4.3 : téléphone : fiche d'émargement vérifiée, ligne « intervenant extérieur » sur deux lignes. V3.4.3 aussi : un nom avec apostrophe se coche et signe dans l'émargement. V3.4.2 : rythme 4 mois : compté dans le % du mois s'il a fait un QHP (+1), sinon hors %. Reprend la V3.4.1 (menu d'une case court)
 const LS='qhp_app_v5', LS_CONF='qhp_conf_v5';
 const EPOCH='1970-01-01T00:00:00.000Z';
 function nowISO(){return new Date().toISOString()}
@@ -24,6 +24,8 @@ const todayISO=new Date().toISOString().slice(0,10);
 function uid(){return 'q'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 function toast(m,e){const t=document.getElementById('toast');t.textContent=m;t.className=(e?'err ':'')+'show';clearTimeout(t._t);t._t=setTimeout(()=>t.className='',2600)}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+/* V3.4.3 : texte mis dans une chaîne JS d'un onclick (un nom avec apostrophe cassait l'émargement) */
+function jsq(s){return esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"))}
 function frDate(iso){const d=new Date(iso+'T00:00');if(isNaN(d))return iso;return d.getDate()+' '+MOIS_S[d.getMonth()]+' '+d.getFullYear()}
 /* V3.3.1 — une date de fiche, quelle que soit sa forme (texte, instant ISO, ISO entre guillemets laissé
    par l'ancien serveur, jj/mm/aaaa), en « aaaa-mm-jj » lu à l'heure de Paris. */
@@ -221,8 +223,8 @@ function renderPickNames(){const term=(document.getElementById('f-search').value
   if(ficheCompacte&&term.length<2&&!(sg&&sg.value)){box.innerHTML='';renderRecap();return}
   const list=filtreGroupe(actifs().filter(p=>p.name.toLowerCase().includes(term)));const g=grouper(list);let h='';
   Object.keys(g).forEach(sec=>{const people=g[sec];if(!people.length)return;const on=people.filter(p=>pickPres[p.name]).length;
-    h+=`<div class="secgrp"><div class="sh"><span>${esc(sec)}</span><span class="cnt">${on}/${people.length} · <a href="#" onclick="secAll('${esc(sec).replace(/'/g,"\\'")}',true);return false">tout</a> · <a href="#" onclick="secAll('${esc(sec).replace(/'/g,"\\'")}',false);return false">rien</a></span></div><div class="names">`;
-    h+=people.map(p=>`<div class="nm ${pickPres[p.name]?'on':''} ${(certitudesFiche[p.name]||100)<85?'incertain':''}" title="${(certitudesFiche[p.name]||100)<85?'lu « '+esc(lusFiche[p.name]||'')+' » — '+certitudesFiche[p.name]+' % : vérifie':''}" onclick="togglePick(this,'${esc(p.name).replace(/'/g,"\\'")}')"><span class="bx">${pickPres[p.name]?'✓':''}</span><span class="nn">${esc(p.name)}${p.conducteur?' 🎓':''}${agPill(p.agence)}</span></div>`).join('');h+='</div></div>'});
+    h+=`<div class="secgrp"><div class="sh"><span>${esc(sec)}</span><span class="cnt">${on}/${people.length} · <a href="#" onclick="secAll('${jsq(sec)}',true);return false">tout</a> · <a href="#" onclick="secAll('${jsq(sec)}',false);return false">rien</a></span></div><div class="names">`;
+    h+=people.map(p=>`<div class="nm ${pickPres[p.name]?'on':''} ${(certitudesFiche[p.name]||100)<85?'incertain':''}" title="${(certitudesFiche[p.name]||100)<85?'lu « '+esc(lusFiche[p.name]||'')+' » — '+certitudesFiche[p.name]+' % : vérifie':''}" onclick="togglePick(this,'${jsq(p.name)}')"><span class="bx">${pickPres[p.name]?'✓':''}</span><span class="nn">${esc(p.name)}${p.conducteur?' 🎓':''}${agPill(p.agence)}</span></div>`).join('');h+='</div></div>'});
   box.innerHTML=h||'<div class="hint">'+(term||(sg&&sg.value)?'Aucun nom ne correspond.':'Aucun collaborateur actif.')+'</div>';renderRecap()}
 function togglePick(el,n){pickPres[n]=!pickPres[n];el.classList.toggle('on',pickPres[n]);el.querySelector('.bx').textContent=pickPres[n]?'✓':'';renderRecap()}
 function secAll(sec,v){const g=grouper(actifs());(g[sec]||[]).forEach(p=>pickPres[p.name]=v);renderPickNames()}
@@ -1006,8 +1008,8 @@ function setYN(id,k,v){emargYN[k]=(emargYN[k]===v)?null:v;renderYN(id,k);
 function renderEmargPick(){const term=(document.getElementById('e-search').value||'').toLowerCase();
   const list=actifs().filter(p=>p.name.toLowerCase().includes(term));const g=grouper(list);let h='';
   Object.keys(g).forEach(sec=>{const people=g[sec];if(!people.length)return;const on=people.filter(p=>emargPick[p.name]).length;
-    h+='<div class="secgrp"><div class="sh"><span>'+esc(sec)+'</span><span class="cnt">'+on+'/'+people.length+' · <a href="#" onclick="emargSecAll(\''+esc(sec).replace(/'/g,"\\'")+'\',true);return false">tout</a></span></div><div class="names">';
-    h+=people.map(p=>'<div class="nm '+(emargPick[p.name]?'on':'')+'" onclick="emargToggle(\''+esc(p.name).replace(/'/g,"\\'")+'\')"><span class="bx">'+(emargPick[p.name]?'✓':'')+'</span><span class="nn">'+esc(p.name)+(p.conducteur?' 🎓':'')+agPill(p.agence)+'</span></div>').join('');
+    h+='<div class="secgrp"><div class="sh"><span>'+esc(sec)+'</span><span class="cnt">'+on+'/'+people.length+' · <a href="#" onclick="emargSecAll(\''+jsq(sec)+'\',true);return false">tout</a></span></div><div class="names">';
+    h+=people.map(p=>'<div class="nm '+(emargPick[p.name]?'on':'')+'" onclick="emargToggle(\''+jsq(p.name)+'\')"><span class="bx">'+(emargPick[p.name]?'✓':'')+'</span><span class="nn">'+esc(p.name)+(p.conducteur?' 🎓':'')+agPill(p.agence)+'</span></div>').join('');
     h+='</div></div>'});
   document.getElementById('e-names').innerHTML=h||'<div class="hint">Aucun collaborateur.</div>'}
 function emargToggle(n){emargPick[n]=!emargPick[n];if(!emargPick[n])delete emargSigs[n];renderEmargPick();renderSigs()}
@@ -1024,7 +1026,7 @@ function renderSigs(){const box=document.getElementById('e-sigs');if(!box)return
   if(!noms.length){box.innerHTML='<div class="hint">Coche des participants ci-dessus — ils apparaîtront ici avec leur case à signer.</div>';majNbSig();return}
   box.innerHTML=noms.map(o=>'<div class="sigrow"><span class="snm">'+esc(o.nom)+'<em>'+esc(o.sub)+'</em></span>'+
     '<canvas data-k="'+esc(o.key)+'" width="336" height="104"></canvas>'+
-    '<button class="sx" title="Effacer la signature" onclick="clearSig(\''+esc(o.key).replace(/'/g,"\\'")+'\')">🧽</button>'+
+    '<button class="sx" title="Effacer la signature" onclick="clearSig(\''+jsq(o.key)+'\')">🧽</button>'+
     (o.ext?'<button class="sx" title="Retirer" onclick="delExterne(\''+o.ext+'\')">✕</button>':'')+'</div>').join('');
   box.querySelectorAll('canvas').forEach(cv=>bindSig(cv,cv.getAttribute('data-k')));majNbSig()}
 function clearSig(k){delete emargSigs[k];renderSigs()}
@@ -1256,8 +1258,14 @@ function collabSensibMois(cond,y,i){const k=mkey(y,i),vus={},c=cleNomJs(cond);
   state.qhps.forEach(q=>{if((q.date||'').slice(0,7)!==k)return;if(cleNomJs(q.cond)!==c)return;
     Object.keys(q.present||{}).forEach(n=>{if(q.present[n])vus[n]=1})});
   return Object.keys(vus).length}
+/* V3.4.3 : un collaborateur qui a animé au moins un QHP dans l'année apparaît aussi dans « Animateurs », même sans la case 🎓 */
+function animateursInconnus(y){const roster={},n={};state.roster.forEach(p=>roster[cleNomJs(p.name)]=1);
+  state.qhps.forEach(q=>{if(String(q.date||'').slice(0,4)!==String(y)||!q.cond)return;if(roster[cleNomJs(q.cond)]||nomRoster(q.cond))return;const t=String(q.cond).trim();n[t]=(n[t]||0)+1});
+  return Object.keys(n).map(t=>({t,n:n[t]}))}
+function animateursAnnee(y){const cles={};state.qhps.forEach(q=>{if(String(q.date||'').slice(0,4)===String(y)&&q.cond)cles[cleNomJs(q.cond)]=1});
+  return state.roster.filter(p=>p.conducteur||cles[cleNomJs(p.name)])}
 function annuelConduc(){
-  const g=grouper(filtrer(animateurs()));
+  const g=grouper(filtrer(animateursAnnee(anAnnee)));
   let h='<div class="card"><h2>🎓 QHP animés · '+anAnnee+'</h2><div class="tbl-wrap"><table class="an"><thead><tr><th class="nom">Animateur</th>'+enteteMois(anAnnee)+'<th>Total</th></tr></thead><tbody>';
   let any=false;
   Object.keys(g).forEach(sec=>{const people=g[sec];if(!people.length)return;any=true;h+='<tr><td class="sec" colspan="14"><span>'+esc(sec)+' ('+people.length+')</span></td></tr>';
@@ -1266,9 +1274,11 @@ function annuelConduc(){
         if(!moisActif(p,anAnnee,i)&&!qhpRealisesCond(p.name,anAnnee,i)){cells+='<td class="g"></td>';continue}
         const n=qhpRealisesCond(p.name,anAnnee,i);tot+=n;
         cells+='<td class="n'+(n?'':' z')+'" title="'+MOIS_L[i]+' : '+n+' QHP animé'+(n>1?'s':'')+' — touche pour voir le mois" onclick="setMois('+i+')">'+(n||(moisPasse(anAnnee,i)?'0':'·'))+'</td>'}
-      h+='<tr><td class="nom">'+esc(p.name)+agPill(p.agence)+'</td>'+cells+'<td class="tot">'+tot+'</td></tr>'})});
+      h+='<tr><td class="nom">'+esc(p.name)+(p.conducteur?'':' <span class="r4" title="A animé un QHP mais n’est pas coché « 🎓 Encadrant chantier » (intranet ▸ Entrées / départs)">sans 🎓</span>')+agPill(p.agence)+'</td>'+cells+'<td class="tot">'+tot+'</td></tr>'})});
   h+='</tbody></table></div>';
-  if(!any)h+='<p class="hint">Aucun animateur dans ce filtre. Un animateur est un collaborateur coché « animateur » (encadrant chantier) dans la liste.</p>';
+  if(!any)h+='<p class="hint">Aucun animateur dans ce filtre. Un animateur est un collaborateur coché « 🎓 Encadrant chantier », ou qui a animé un QHP dans l’année.</p>';
+  const inconnus=animateursInconnus(anAnnee);
+  if(inconnus.length)h+='<p class="hint">⚠️ Animateur écrit sur une fiche mais absent de la liste : '+inconnus.map(x=>'<b>'+esc(x.t)+'</b> ('+x.n+')').join(', ')+' — ouvre la fiche (Historique) et choisis l’animateur dans la liste, ou ajoute la personne dans l’intranet (Entrées / départs, case « Suivi dans les QHP »).</p>';
   h+='<div class="legende"><span>Nombre de QHP animés dans le mois (d’après les fiches : champ « Animateur »)</span><span><b>Touche un mois</b> pour voir ses QHP</span></div>';
   h+='<div class="row no-print" style="margin-top:10px"><button class="btn btn-ghost grow" onclick="exportConduc('+anAnnee+')">⬇ Export CSV</button><button class="btn btn-ghost grow" onclick="window.print()">🖨 Imprimer</button></div></div>';return h}
 function setGestion(key,cond,val){if(!state.gestion[key])state.gestion[key]={};const n=parseInt(val);if(val===''||isNaN(n))delete state.gestion[key][cond];else state.gestion[key][cond]=n;
@@ -1280,7 +1290,7 @@ function renderMensuel(y,i){
   const qs=qhpsDuMois(y,i);
   const effTous=filtrer(actifs()).filter(p=>moisActif(p,y,i)&&!estExclu(p.name,y,i));
   const venu=p=>qs.some(q=>q.present&&q.present[p.name]);
-  /* V3.4.2 : rythme 4 mois → hors % le mois où la personne n'a pas fait de QHP ; si elle en a fait un, elle compte (+1 présent, +1 effectif) */
+  /* V3.4.3 aussi : un nom avec apostrophe se coche et signe dans l'émargement. V3.4.2 : rythme 4 mois → hors % le mois où la personne n'a pas fait de QHP ; si elle en a fait un, elle compte (+1 présent, +1 effectif) */
   const eff=effTous.filter(p=>!quatreMois(p)||venu(p)),hors4=effTous.length-eff.length;
   const N=eff.length;
   const vus=new Set();qs.forEach(q=>eff.forEach(p=>{if(q.present&&q.present[p.name])vus.add(p.name)}));
@@ -1375,7 +1385,7 @@ function exportCollab(annee){const sep=';';let rows=[['Groupe','Agence','Collabo
   dl('QHP-participation-'+annee+'.csv','\ufeff'+rows.join('\r\n'),'text/csv;charset=utf-8');toast('Export participation OK')}
 function exportConduc(annee){const sep=';';
   let rows=[['Groupe','Animateur','Agence',...MOIS_L,'Total'].map(csvCell).join(sep)];
-  const g=grouper(animateurs());Object.keys(g).forEach(sec=>g[sec].forEach(p=>{let tot=0;const q=[];
+  const g=grouper(animateursAnnee(annee));Object.keys(g).forEach(sec=>g[sec].forEach(p=>{let tot=0;const q=[];
     for(let i=0;i<12;i++){const n=qhpRealisesCond(p.name,annee,i);tot+=n;q.push(moisActif(p,annee,i)||n?n:'')}
     rows.push([sec,p.name,p.agence||'IDF',...q,tot].map(csvCell).join(sep))}));
   dl('QHP-animateurs-'+annee+'.csv','﻿'+rows.join('\r\n'),'text/csv;charset=utf-8');toast('Export animateurs OK')}
