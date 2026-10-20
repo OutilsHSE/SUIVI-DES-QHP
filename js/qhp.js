@@ -4,7 +4,7 @@
    cases cliquables (a participé / N/A / absent) sans doublon ; l'animateur compte parmi les
    participants ; alerte « fiche en double » (même jour, même animateur) ; mois de départ = N/A ;
    « Animateur » remplace « Conducteur » ; liste des collaborateurs alignée sur le Référentiel. */
-const APP_VERSION_QHP='V3.3.3';   // 20/10/2026 — une fiche supprimée pendant une synchro (envoi des scans en cours) ne revient plus : la réponse du serveur est fusionnée avec ce qui a changé sur l'appareil entre-temps, et la synchro est relancée
+const APP_VERSION_QHP='V3.4.1';   // 20/10/2026 — menu d'une case du suivi : court, N/A en premier, QHP du mois en liste déroulante, reste dans l'écran
 const LS='qhp_app_v5', LS_CONF='qhp_conf_v5';
 const EPOCH='1970-01-01T00:00:00.000Z';
 function nowISO(){return new Date().toISOString()}
@@ -13,7 +13,7 @@ function nowISO(){return new Date().toISOString()}
    et seulement pour un appareil branché. Secteurs et agences : data/listes.json. */
 let SEED={secteurs:[],agences:['IDF','NA','BPL'],roster:[]};
 const SUPPORT='Fonctions Support';
-let state={ secteurs:[], agences:['IDF','NA','BPL'], roster:[], chantiers:[], qhps:[], gestion:{}, exclus:{} };
+let state={ secteurs:[], agences:['IDF','NA','BPL'], roster:[], chantiers:[], qhps:[], gestion:{}, exclus:{}, cadence:{} };
 let conf={ objPart:80, cadStd:1, cadSup:0.25, webhook:'', secret:'', appareil:'', autoSync:true };
 let editId=null,pickPres={},piecesPending=null,ficheCompacte=false,apercuPliee=false;
 let anMode='collab', anAnnee=new Date().getFullYear(), anFiltre='(tous)', anMois='';   // anMois '' = année entière, sinon 0..11
@@ -41,13 +41,13 @@ function load(){try{const r=localStorage.getItem(LS);if(r){const s=JSON.parse(r)
   if(!state.secteurs||!state.secteurs.length)state.secteurs=['Exploitation'];
   if(!state.agences||!state.agences.length)state.agences=['IDF','NA','BPL'];
   ['roster','chantiers','qhps'].forEach(k=>{if(!Array.isArray(state[k]))state[k]=[]});
-  if(!state.gestion)state.gestion={}; if(!state.exclus)state.exclus={};
+  if(!state.gestion)state.gestion={}; if(!state.exclus)state.exclus={}; if(!state.cadence)state.cadence={};
   state.roster.forEach(p=>{if(p.dateAjout===undefined)p.dateAjout='';if(p.dateDepart===undefined)p.dateDepart='';if(!p.agence)p.agence='IDF'});
   if(!state.tomb)state.tomb={qhps:{},roster:{},chantiers:{},secteurs:{}};
   reparerDates();   // V3.3.1 : répare les dates déjà abîmées sur cet appareil
   ['qhps','roster','chantiers','secteurs'].forEach(k=>{if(!state.tomb[k])state.tomb[k]={}});
-  if(!state.majDico)state.majDico={gestion:{},exclus:{},conf:{}};
-  ['gestion','exclus','conf'].forEach(k=>{if(!state.majDico[k])state.majDico[k]={}});
+  if(!state.majDico)state.majDico={gestion:{},exclus:{},conf:{},cadence:{}};
+  ['gestion','exclus','conf','cadence'].forEach(k=>{if(!state.majDico[k])state.majDico[k]={};const m=state.majDico[k];Object.keys(m).forEach(c=>{const s=String(m[c]||'');if(s&&!/^\d{4}-\d{2}-\d{2}T/.test(s)){const d=new Date(s);m[c]=isNaN(d)?EPOCH:d.toISOString()}})});   // V3.3.4
   try{const c=localStorage.getItem(LS_CONF);if(c)conf=Object.assign(conf,JSON.parse(c))}catch(e){}}
 function save(){try{localStorage.setItem(LS,JSON.stringify(state))}catch(e){toast('Mémoire pleine — sauvegarde puis retire d\'anciens PDF',true)}}
 function saveConf(){conf.objPart=Math.max(0,Math.min(100,parseInt(document.getElementById('obj-part').value)||0));
@@ -63,7 +63,23 @@ async function pdfDel(id){try{const db=await idb();await new Promise((r,j)=>{con
 function conducteurs(){return state.roster.filter(p=>p.conducteur)}
 const animateurs=conducteurs;
 function actifs(){return state.roster.filter(p=>!p.dateDepart||p.dateDepart>=todayISO)}
-function cadence(p){return (p.secteur===SUPPORT)?conf.cadSup:conf.cadStd}
+/* V3.4 — rythme par collaborateur : curseur des Réglages (state.cadence.c[nom] = 4 ou 1), sinon le groupe
+   Fonctions Support est à « 4 mois ». Une personne à 4 mois ne compte pas dans le % mensuel. */
+function quatreMois(p){const v=((state.cadence||{}).c||{})[p.name];if(String(v)==='4')return true;if(String(v)==='1')return false;return p.secteur===SUPPORT}
+function cadence(p){return quatreMois(p)?conf.cadSup:conf.cadStd}
+function setRythme(name,quatre){if(!state.cadence)state.cadence={};if(!state.cadence.c)state.cadence.c={};
+  state.cadence.c[name]=quatre?'4':'1';state.majDico.cadence['c|'+name]=nowISO();save();renderRythme();syncAuto();
+  toast(name+(quatre?' : 1 QHP tous les 4 mois (hors % mensuel)':' : rythme mensuel (compté dans le %)'))}
+function renderRythme(){const box=document.getElementById('ry-liste');if(!box)return;
+  const sg=document.getElementById('ry-groupe');if(sg&&!sg.options.length){sg.innerHTML='<option value="">👥 Tous les groupes</option>'+state.secteurs.map(g=>'<option value="'+esc(g)+'">'+esc(g)+'</option>').join('')}
+  const t=cleNomJs(document.getElementById('ry-cherche').value||''),g0=sg?sg.value:'';
+  const L=actifs().filter(p=>(!t||cleNomJs(p.name).includes(t))&&(!g0||p.secteur===g0));
+  const g=grouper(L);let h='';
+  Object.keys(g).forEach(sec=>{const pp=g[sec];const n4=pp.filter(quatreMois).length;
+    h+='<div class="ry-g"><span>'+esc(sec)+'</span><span class="muted">'+n4+' / '+pp.length+' à 4 mois</span></div>'
+      +pp.map(p=>{const q=quatreMois(p),def=p.secteur===SUPPORT,force=((state.cadence||{}).c||{})[p.name]!==undefined;
+        return '<label class="ry-l"><span>'+esc(p.name)+(force&&q!==def?' <span class="def">(réglé à la main)</span>':'')+'</span><span class="sw"><input type="checkbox" data-n="'+esc(p.name)+'" '+(q?'checked':'')+' onchange="setRythme(this.dataset.n,this.checked)"><i></i></span></label>'}).join('')});
+  box.innerHTML=h||'<p class="hint">Aucun collaborateur ne correspond.</p>'}
 function grouper(list){const g={};state.secteurs.forEach(s=>g[s]=[]);g['(sans groupe)']=[];
   (list||state.roster).forEach(p=>{const s=state.secteurs.includes(p.secteur)?p.secteur:'(sans groupe)';g[s].push(p)});
   Object.keys(g).forEach(k=>{if(!g[k].length)delete g[k]});return g}
@@ -392,6 +408,7 @@ function syncPayload(){
     secteurs:state.secteurs.map((n,i)=>({nom:n,maj:EPOCH,ordre:i})).concat(tombes(state.tomb.secteurs,'nom')),
     gestion:dicoPayload(state.gestion,state.majDico.gestion),
     exclus:dicoPayload(state.exclus,state.majDico.exclus),
+    cadence:dicoPayload(state.cadence||{},state.majDico.cadence||{}),   // V3.4
     conf:dicoPayload({'_':{objPart:conf.objPart,cadStd:conf.cadStd,cadSup:conf.cadSup}},state.majDico.conf)
   }}}
 /* Le piège classique : coller l'adresse de TEST (/dev) au lieu de celle du
@@ -438,6 +455,19 @@ function fusionReponse(d,t0){
     if(String(l.maj||'')>=String(t0||'')&&!(tomb[l.id]&&String(tomb[l.id])>=String(l.maj||'')))out.push(l)});   // créée pendant la synchro
   state.tomb.qhps=tomb;
   return out}
+/* V3.3.4 — un horodatage relu peut être « Tue Oct 20 2026 … » (date Sheets mise en texte par l'ancien
+   serveur) : on le remet en ISO, sinon il paraît toujours plus récent qu'un horodatage de l'appli. */
+function majIso(v){const s=String(v||'');if(/^\d{4}-\d{2}-\d{2}T/.test(s))return s;const d=new Date(s);return (s&&!isNaN(d))?d.toISOString():EPOCH}
+function fusionDico(nom,srv,srvMaj){if(!srv)return;
+  const loc=state[nom]||{},locMaj=state.majDico[nom]||{},out={},maj={};
+  Object.keys(srv).forEach(g=>{out[g]=Object.assign({},srv[g])});
+  Object.keys(srvMaj||{}).forEach(k=>maj[k]=majIso(srvMaj[k]));
+  Object.keys(locMaj).forEach(k=>{const ml=majIso(locMaj[k]);if(maj[k]&&ml<=maj[k])return;   // le serveur a plus récent (ou pareil)
+    const i=k.indexOf('|');if(i<0)return;const g=k.slice(0,i),n=k.slice(i+1);
+    const v=loc[g]&&loc[g][n]!==undefined?loc[g][n]:'';
+    if(v===''||v===null){if(out[g]){delete out[g][n];if(!Object.keys(out[g]).length)delete out[g]}}else{(out[g]=out[g]||{})[n]=v}
+    maj[k]=ml});
+  state[nom]=out;state.majDico[nom]=maj}
 function appliquerSync(d,t0){
   if(Array.isArray(d.qhps))state.qhps=fusionReponse(d,t0);   // V3.3.3 (dates réparées dans fusionReponse, V3.3.1)
   if(Array.isArray(d.roster))state.roster=d.roster.map(p=>{const o=Object.assign({dateAjout:'',dateDepart:'',agence:'IDF'},p);o.dateAjout=jourQ(o.dateAjout);o.dateDepart=jourQ(o.dateDepart);return o});
@@ -446,8 +476,9 @@ function appliquerSync(d,t0){
   if(Array.isArray(d.chantiers))state.chantiers=d.chantiers;
   if(Array.isArray(d.secteurs)&&d.secteurs.length)state.secteurs=d.secteurs;
   if(d.tombRoster)state.tomb.roster=d.tombRoster;
-  if(d.gestion)state.gestion=d.gestion; if(d.gestionMaj)state.majDico.gestion=d.gestionMaj;
-  if(d.exclus)state.exclus=d.exclus;    if(d.exclusMaj)state.majDico.exclus=d.exclusMaj;
+  fusionDico('gestion',d.gestion,d.gestionMaj);   // V3.3.4 : garde les cases changées ici pendant la synchro
+  fusionDico('exclus',d.exclus,d.exclusMaj);
+  fusionDico('cadence',d.cadence,d.cadenceMaj);   // V3.4
   if(d.conf){['objPart','cadStd','cadSup'].forEach(k=>{if(d.conf[k]!==undefined&&d.conf[k]!=='')conf[k]=Number(d.conf[k])})}
   if(d.confMaj)state.majDico.conf=d.confMaj;
   state.roster.forEach(p=>{p.conducteur=(p.conducteur===true||p.conducteur==='oui')});
@@ -529,7 +560,7 @@ function lienBranchement(avecEmarg){
 function copierBranchement(avecEmarg){
   const l=lienBranchement(avecEmarg);
   if(!l){toast('Configure d\'abord la synchronisation',true);return}
-  const fini=()=>toast(avecEmarg?'Lien conducteur copié ✓ — envoie-le par SMS':'Lien de branchement copié ✓');
+  const fini=()=>toast(avecEmarg?'Lien encadrant copié ✓ — envoie-le par SMS':'Lien de branchement copié ✓');
   if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(l).then(fini).catch(()=>prompt('Copie ce lien :',l));
   else prompt('Copie ce lien :',l)}
 function appliquerLienBranchement(){
@@ -1167,7 +1198,7 @@ function annuelCollab(){
   const g=grouper(filtrer(state.roster.slice()));
   let h='<div class="card"><h2>👥 Participation aux QHP · '+anAnnee+'</h2><div class="tbl-wrap"><table class="an"><thead><tr><th class="nom">Collaborateur</th>'+enteteMois(anAnnee)+'<th>Total</th></tr></thead><tbody>';
   let any=false;
-  Object.keys(g).forEach(sec=>{const people=g[sec];if(!people.length)return;any=true;h+='<tr><td class="sec" colspan="14"><span>'+esc(sec)+' ('+people.length+')'+(sec===SUPPORT?' — 1 QHP / 4 mois':'')+'</span></td></tr>';
+  Object.keys(g).forEach(sec=>{const people=g[sec];if(!people.length)return;any=true;h+='<tr><td class="sec" colspan="14"><span>'+esc(sec)+' ('+people.length+')'+(sec===SUPPORT?' — 1 QHP / 4 mois par défaut':'')+'</span></td></tr>';
     people.forEach(p=>{let cells='';
       for(let i=0;i<12;i++){
         const nm=esc(p.name),attr=' data-n="'+nm+'" data-y="'+anAnnee+'" data-i="'+i+'" onclick="ouvrirMenuCase(event,this)"';
@@ -1177,7 +1208,7 @@ function annuelCollab(){
         else if(moisPasse(anAnnee,i))cells+='<td class="x"'+attr+' title="Absent — touche pour l’ajouter à un QHP ou le passer en N/A">✗</td>';
         else cells+='<td class="fut">·</td>'}
       const b=bilanIndividuel(p,anAnnee);
-      h+='<tr><td class="nom">'+esc(p.name)+(p.conducteur?' <span title="animateur">🎓</span>':'')+agPill(p.agence)+ICO[b.etat]+'</td>'+cells+'<td class="tot" title="attendu à ce jour : '+(b.attendu||'—')+'">'+b.tot+'</td></tr>'})});
+      h+='<tr><td class="nom">'+esc(p.name)+(p.conducteur?' <span title="animateur">🎓</span>':'')+(quatreMois(p)?'<span class="r4" title="1 QHP tous les 4 mois — hors % mensuel (Réglages ▸ Rythme des QHP)">4 mois</span>':'')+agPill(p.agence)+ICO[b.etat]+'</td>'+cells+'<td class="tot" title="attendu à ce jour : '+(b.attendu||'—')+'">'+b.tot+'</td></tr>'})});
   h+='</tbody></table></div>';
   if(!any)h+='<p class="hint">Aucun collaborateur.</p>';
   h+='<div class="legende"><span><b class="lv">V</b> présent</span><span><b class="lx">✗</b> absent</span><span><b>N/A</b> non compté (arrêt, congés, parti)</span><span>· à venir</span><span>✅ ≥ 80 % de l’attendu · ⚠️ en dessous · 🚫 aucun QHP</span><span><b>Touche une case</b> pour ajouter une participation ou passer en N/A · <b>touche un mois</b> pour le détailler</span></div>';
@@ -1188,20 +1219,26 @@ let popCible=null;
 function fermerPop(){const el=document.getElementById('popcell');if(el){el.style.display='none';el.innerHTML=''}popCible=null}
 document.addEventListener('mousedown',e=>{const el=document.getElementById('popcell');if(el&&el.style.display!=='none'&&!el.contains(e.target)&&!(e.target.closest&&e.target.closest('td.v,td.x,td.na')))fermerPop()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')fermerPop()});
+/* V3.4.1 — menu d'une case, COURT : l'action principale en premier (N/A / remettre absent), les QHP du mois
+   dans une liste déroulante (plus la liste de toutes les fiches du mois qui débordait de l'écran et se
+   refermait quand on faisait défiler la page). Le menu reste dans la fenêtre (position fixe). */
 function ouvrirMenuCase(ev,td){
   const name=td.dataset.n,y=+td.dataset.y,i=+td.dataset.i;const el=document.getElementById('popcell');
   if(popCible===td){fermerPop();return}
   popCible=td;const qs=qhpsDuMois(y,i),dedans=fichesOuPresent(name,y,i),dehors=qs.filter(q=>!(q.present&&q.present[name]));
-  const lq=q=>esc(frDate(q.date))+' · '+esc(q.cond||'sans animateur')+' <small>'+esc(q.chantier||'')+'</small>';
-  let h='<div class="pt">'+esc(name)+'<small>'+MOIS_L[i]+' '+y+(dedans.length?' · présent à '+dedans.length+' QHP':estExclu(name,y,i)?' · non compté (N/A)':' · absent')+'</small></div>';
-  const na=encodeURIComponent(name);
-  if(dedans.length){h+=dedans.map(q=>'<button class="q" onclick="retirerPresence(\''+q.id+'\',decodeURIComponent(\''+na+'\'))">➖ Retirer de : '+lq(q)+'</button>').join('')+'<div class="sep"></div>'}
-  if(dehors.length){h+='<button disabled style="cursor:default"><b>✅ A participé à…</b></button>'+dehors.map(q=>'<button class="q" onclick="ajouterPresence(\''+q.id+'\',decodeURIComponent(\''+na+'\'))">'+lq(q)+'</button>').join('')}
-  h+='<button onclick="nouvelleFichePour(decodeURIComponent(\''+na+'\'),'+y+','+i+')">➕ <b>Nouvelle fiche</b> ce mois, avec '+esc(name)+'</button>';
-  if(!dedans.length){h+='<div class="sep"></div><button onclick="fermerPop();toggleExclu(decodeURIComponent(\''+na+'\'),'+y+','+i+')">'+(estExclu(name,y,i)?'✗ Remettre <b>absent</b>':'⛔ Passer en <b>N/A</b> (non compté)')+'</button>'}
+  const na=esc(name),ex=estExclu(name,y,i);
+  const lq=q=>esc(frDate(jourQ(q.date)))+' · '+esc(q.cond||'sans animateur')+' <small>'+esc(q.chantier||'')+'</small>';
+  let h='<div class="pt">'+na+'<small>'+MOIS_L[i]+' '+y+(dedans.length?' · présent à '+dedans.length+' QHP':ex?' · non compté (N/A)':' · absent')+'</small></div>';
+  if(!dedans.length)h+='<button class="pri" data-n="'+na+'" onclick="fermerPop();toggleExclu(this.dataset.n,'+y+','+i+')">'+(ex?'✗ Remettre <b>absent</b>':'⛔ Passer en <b>N/A</b> <small>(non compté ce mois)</small>')+'</button>';
+  else h+=dedans.map(q=>'<button class="q" data-n="'+na+'" data-q="'+esc(q.id)+'" onclick="retirerPresence(this.dataset.q,this.dataset.n)">➖ Retirer de : '+lq(q)+'</button>').join('');
+  if(dehors.length)h+='<div class="sep"></div><label class="pl">✅ A participé au QHP…</label><select class="psel" data-n="'+na+'" onchange="if(this.value)ajouterPresence(this.value,this.dataset.n)"><option value="">— choisir parmi les '+dehors.length+' QHP du mois —</option>'
+    +dehors.map(q=>'<option value="'+esc(q.id)+'">'+esc(frDate(jourQ(q.date))+' · '+(q.cond||'sans animateur')+(q.chantier?' · '+q.chantier:''))+'</option>').join('')+'</select>';
+  h+='<button class="sec2" data-n="'+na+'" onclick="nouvelleFichePour(this.dataset.n,'+y+','+i+')">➕ Nouvelle fiche ce mois</button>';
   el.innerHTML=h;el.style.display='block';
-  const r=td.getBoundingClientRect();const w=el.offsetWidth||280;let x=r.left+window.scrollX;if(x+w>window.scrollX+document.documentElement.clientWidth-8)x=Math.max(8,window.scrollX+document.documentElement.clientWidth-w-8);
-  el.style.left=x+'px';el.style.top=(r.bottom+window.scrollY+4)+'px'}
+  const r=td.getBoundingClientRect(),vw=document.documentElement.clientWidth,vh=window.innerHeight,w=el.offsetWidth||280,hh=el.offsetHeight||200;
+  let x=Math.min(Math.max(8,r.left),vw-w-8),yv=r.bottom+4;if(yv+hh>vh-8)yv=Math.max(8,r.top-hh-4);
+  el.style.left=x+'px';el.style.top=yv+'px'}
+window.addEventListener('scroll',()=>{if(popCible)fermerPop()},{passive:true});   // le menu suit sa case : on le referme si la page défile
 function ajouterPresence(qid,name){const q=state.qhps.find(x=>x.id===qid);if(!q)return;
   if(q.present&&q.present[name]){toast(name+' est déjà compté sur cette fiche');fermerPop();return}   // anti-doublon
   q.present=q.present||{};q.present[name]=true;q.maj=nowISO();save();fermerPop();renderSuivi();toast(name+' ajouté au QHP du '+frDate(q.date)+' ✓');syncAuto(q.id)}
@@ -1231,7 +1268,7 @@ function annuelConduc(){
         cells+='<td class="n'+(n?'':' z')+'" title="'+MOIS_L[i]+' : '+n+' QHP animé'+(n>1?'s':'')+' — touche pour voir le mois" onclick="setMois('+i+')">'+(n||(moisPasse(anAnnee,i)?'0':'·'))+'</td>'}
       h+='<tr><td class="nom">'+esc(p.name)+agPill(p.agence)+'</td>'+cells+'<td class="tot">'+tot+'</td></tr>'})});
   h+='</tbody></table></div>';
-  if(!any)h+='<p class="hint">Aucun animateur dans ce filtre. Un animateur est un collaborateur coché « animateur » (conducteur de travaux) dans la liste.</p>';
+  if(!any)h+='<p class="hint">Aucun animateur dans ce filtre. Un animateur est un collaborateur coché « animateur » (encadrant chantier) dans la liste.</p>';
   h+='<div class="legende"><span>Nombre de QHP animés dans le mois (d’après les fiches : champ « Animateur »)</span><span><b>Touche un mois</b> pour voir ses QHP</span></div>';
   h+='<div class="row no-print" style="margin-top:10px"><button class="btn btn-ghost grow" onclick="exportConduc('+anAnnee+')">⬇ Export CSV</button><button class="btn btn-ghost grow" onclick="window.print()">🖨 Imprimer</button></div></div>';return h}
 function setGestion(key,cond,val){if(!state.gestion[key])state.gestion[key]={};const n=parseInt(val);if(val===''||isNaN(n))delete state.gestion[key][cond];else state.gestion[key][cond]=n;
@@ -1241,14 +1278,15 @@ function setGestion(key,cond,val){if(!state.gestion[key])state.gestion[key]={};c
 function renderMensuel(y,i){
   const yy=String(y),mois=mkey(y,i);
   const qs=qhpsDuMois(y,i);
-  const eff=filtrer(actifs()).filter(p=>moisActif(p,y,i)&&!estExclu(p.name,y,i));
+  const effTous=filtrer(actifs()).filter(p=>moisActif(p,y,i)&&!estExclu(p.name,y,i));
+  const eff=effTous.filter(p=>!quatreMois(p)),hors4=effTous.length-eff.length;   // V3.4 : rythme 4 mois hors %
   const N=eff.length;
   const vus=new Set();qs.forEach(q=>eff.forEach(p=>{if(q.present&&q.present[p.name])vus.add(p.name)}));
   const taux=N?Math.round(vus.size/N*100):0;const ok=taux>=conf.objPart;
   const nbExclus=filtrer(actifs()).filter(p=>moisActif(p,y,i)&&estExclu(p.name,y,i)).length;
   let h='<div class="card no-print"><div class="mois-nav"><button class="btn btn-ghost btn-sm" onclick="setMois(\'\')">◀ Année entière</button><span class="grow"></span><button class="btn btn-ghost btn-sm" onclick="chgMois(-1)">◀</button><b>'+MOIS_L[i]+' '+yy+'</b><button class="btn btn-ghost btn-sm" onclick="chgMois(1)">▶</button></div></div>';
   h+='<div class="kpis"><div class="kpi"><div class="v">'+qs.length+'</div><div class="l">QHP réalisés</div></div>'
-    +'<div class="kpi '+(ok?'goodbg':'warnbg')+'"><div class="v">'+taux+'%</div><div class="l">Participation ('+vus.size+'/'+N+')</div></div>'
+    +'<div class="kpi '+(ok?'goodbg':'warnbg')+'"><div class="v">'+taux+'%</div><div class="l">Participation ('+vus.size+'/'+N+')'+(hors4?'<br><span class="r4" title="réglé dans Réglages ▸ Rythme des QHP">+ '+hors4+' au rythme 4 mois, hors %</span>':'')+'</div></div>'
     +'<div class="kpi big"><div class="l" style="margin-bottom:2px">Objectif participation '+conf.objPart+'%</div><div class="bar '+(ok?'ok':'warn')+'"><i style="width:'+Math.min(100,taux)+'%"></i><span class="seuil" style="left:'+Math.min(100,conf.objPart)+'%"></span></div><div class="sub">'+(ok?'✅ Objectif atteint':'⛔ '+(conf.objPart-taux)+' pts sous l’objectif')+(nbExclus?' · '+nbExclus+' personne(s) non comptée(s) ce mois':'')+'</div></div></div>';
   // par agence (compact)
   const ags=state.agences.map(a=>{const l=eff.filter(p=>(p.agence||'IDF')===a);if(!l.length)return '';const v=l.filter(p=>vus.has(p.name)).length;const pc=Math.round(v/l.length*100);
@@ -1259,6 +1297,7 @@ function renderMensuel(y,i){
 
 /* ===== Réglages ===== */
 function renderReglages(){
+  renderRythme();   // V3.4
   document.getElementById('lien-emarg').value=lienEmarg();
   document.getElementById('sy-url').value=conf.webhook||'';
   document.getElementById('sy-secret').value=conf.secret||'';
