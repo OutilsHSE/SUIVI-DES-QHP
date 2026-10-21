@@ -4,7 +4,7 @@
    cases cliquables (a participé / N/A / absent) sans doublon ; l'animateur compte parmi les
    participants ; alerte « fiche en double » (même jour, même animateur) ; mois de départ = N/A ;
    « Animateur » remplace « Conducteur » ; liste des collaborateurs alignée sur le Référentiel. */
-const APP_VERSION_QHP='V3.4.6';   // 20/10/2026 — correcteur : noms des personnes parties (noms écrits sur d’autres fiches), « Laisser tel quel », doublons de la liste signalés et corrigeables. V3.4.5 : « Animateurs à corriger » : un nom mal écrit corrigé sur toutes ses fiches en un clic. V3.4.4 : onglet Animateurs : tout collaborateur qui a animé un QHP dans l'année (même sans 🎓), animateurs inconnus signalés. V3.4.3 : téléphone : fiche d'émargement vérifiée, ligne « intervenant extérieur » sur deux lignes. V3.4.3 aussi : un nom avec apostrophe se coche et signe dans l'émargement. V3.4.2 : rythme 4 mois : compté dans le % du mois s'il a fait un QHP (+1), sinon hors %. Reprend la V3.4.1 (menu d'une case court)
+const APP_VERSION_QHP='V3.4.7';   // 21/10/2026 — lien d’émargement à clé « émargement seul » : la fiche s’ouvre seule, sans accès au suivi ; ce qui traînait d’un ancien branchement est effacé. V3.4.6 : correcteur : noms des personnes parties (noms écrits sur d’autres fiches), « Laisser tel quel », doublons de la liste signalés et corrigeables. V3.4.5 : « Animateurs à corriger » : un nom mal écrit corrigé sur toutes ses fiches en un clic. V3.4.4 : onglet Animateurs : tout collaborateur qui a animé un QHP dans l'année (même sans 🎓), animateurs inconnus signalés. V3.4.3 : téléphone : fiche d'émargement vérifiée, ligne « intervenant extérieur » sur deux lignes. V3.4.3 aussi : un nom avec apostrophe se coche et signe dans l'émargement. V3.4.2 : rythme 4 mois : compté dans le % du mois s'il a fait un QHP (+1), sinon hors %. Reprend la V3.4.1 (menu d'une case court)
 const LS='qhp_app_v5', LS_CONF='qhp_conf_v5';
 const EPOCH='1970-01-01T00:00:00.000Z';
 function nowISO(){return new Date().toISOString()}
@@ -390,7 +390,8 @@ async function repriseEnvois(){try{const lim=new Date(Date.now()-7*864e5).toISOS
     const it=await piecesGet(q.id);if(it.length&&it.some(p=>!p.driveId)){syncFile.push(q.id);n++}}
   if(n){garderFile();syncAuto()}return n}catch(e){return 0}}
 function syncConfigure(){return !!conf.webhook}
-function syncEtat(txt,cls){const el=document.getElementById('sync-etat');if(el)el.innerHTML='<span class="'+(cls||'')+'">'+esc(txt)+'</span>'}
+function syncEtat(txt,cls){const h='<span class="'+(cls||'')+'">'+esc(txt)+'</span>';const el=document.getElementById('sync-etat');if(el)el.innerHTML=h;
+  const em=document.getElementById('em-etat');if(em)em.innerHTML=modeEmarg()?h:''}   // V3.4.7 : état d'envoi visible sur la fiche d'émargement
 function dicoPayload(dico,majs){
   const out=[],vus={};
   Object.keys(majs||{}).forEach(k=>{
@@ -471,6 +472,7 @@ function fusionDico(nom,srv,srvMaj){if(!srv)return;
     maj[k]=ml});
   state[nom]=out;state.majDico[nom]=maj}
 function appliquerSync(d,t0){
+  if(d.cleEmarg&&d.cleEmarg!==conf.cleEmarg){conf.cleEmarg=d.cleEmarg;try{localStorage.setItem(LS_CONF,JSON.stringify(conf))}catch(e){}}   // V3.4.7 : pour le lien « encadrant »
   if(Array.isArray(d.qhps))state.qhps=fusionReponse(d,t0);   // V3.3.3 (dates réparées dans fusionReponse, V3.3.1)
   if(Array.isArray(d.roster))state.roster=d.roster.map(p=>{const o=Object.assign({dateAjout:'',dateDepart:'',agence:'IDF'},p);o.dateAjout=jourQ(o.dateAjout);o.dateDepart=jourQ(o.dateDepart);return o});
   state.rosterSource=d.rosterSource==='referentiel'?'referentiel':'appli';   // V2.1 : liste tenue dans le Référentiel CDES
@@ -485,7 +487,65 @@ function appliquerSync(d,t0){
   if(d.confMaj)state.majDico.conf=d.confMaj;
   state.roster.forEach(p=>{p.conducteur=(p.conducteur===true||p.conducteur==='oui')});
   save();try{localStorage.setItem(LS_CONF,JSON.stringify(conf))}catch(e){}}
+/* ===== V3.4.7 — MODE « ÉMARGEMENT SEUL » =====
+   Ouvert par le lien d'émargement de l'intranet (clé limitée). L'appareil ne voit que la fiche d'émargement :
+   la liste des personnes en poste et les chantiers arrivent du serveur, la fiche signée y part, rien d'autre.
+   Le serveur refuse de toute façon tout le reste avec cette clé ; ici on n'affiche et on ne garde rien de plus. */
+function modeEmarg(){return conf.mode==='emarg'}
+async function verifierAvantEmarg(cle){
+  try{const j=await syncAppel({secret:conf.secret,action:'ping',appareil:conf.appareil||'appareil'},20000);
+    if(j.role!=='emarg'){toast('Appareil du service HSE : le suivi complet reste disponible');return}}
+  catch(e){if(!/refus/i.test(String(e&&e.message||'')))return}   // pas de réseau : on vérifiera à la prochaine ouverture
+  basculerEmarg(cle)}
+function basculerEmarg(cle){
+  conf.secret=cle;conf.mode='emarg';conf.autoSync=true;try{localStorage.setItem(LS_CONF,JSON.stringify(conf))}catch(e){}
+  preparerModeEmarg();document.body.classList.add('mode-emarg');
+  document.getElementById('sync-pill').style.display='';openEmarg();setTimeout(()=>syncNow(false),300)}
+function preparerModeEmarg(){
+  // appareil branché AVANT avec la clé complète (ancien lien) : on garde seulement les fiches d'émargement récentes à renvoyer
+  const lim=new Date(Date.now()-60*864e5).toISOString().slice(0,10);
+  state.qhps=(state.qhps||[]).filter(q=>q.source==='emargement'&&String(q.date||'')>=lim).map(q=>Object.assign(q,{_aEnvoyer:true,_local:false}));
+  state.roster=[];state.exclus={};state.gestion={};state.cadence={};state.tomb={qhps:{},roster:{},chantiers:{},secteurs:{}};
+  state.brouillons=[];state.majDico={};state.referentiel=null;
+  syncFile=[];garderFile();
+  try{indexedDB.deleteDatabase('qhp_pdf')}catch(e){}
+  try{localStorage.removeItem('qhp_dbl_ok_v1');localStorage.removeItem('qhp_anim_ok_v1');localStorage.removeItem('qhp_alias_v1')}catch(e){}
+  save()}
+function purgerModeEmarg(){
+  // ne restent sur l'appareil que SES fiches de la semaine (pour imprimer) et celles pas encore parties
+  const lim=Date.now()-7*864e5;
+  state.qhps=(state.qhps||[]).filter(q=>q._aEnvoyer||(q._local&&Date.parse((q.emarg&&q.emarg.at)||q.maj||0)>=lim))}
+async function syncEmarg(manuel){
+  if(syncEnCours){if(manuel)toast('Synchro déjà en cours…');return false}
+  syncEnCours=true;syncEtat('⏳ Envoi…','muted');
+  try{
+    const l=await syncAppel({secret:conf.secret,action:'emarg-liste',appareil:conf.appareil||'appareil'});
+    const d=l.data||{};
+    if(Array.isArray(d.roster))state.roster=d.roster.map(p=>Object.assign({dateAjout:'',dateDepart:'',agence:'IDF',secteur:''},p));
+    if(Array.isArray(d.chantiers))state.chantiers=d.chantiers;
+    if(Array.isArray(d.secteurs)&&d.secteurs.length)state.secteurs=d.secteurs;
+    const aEnv=state.qhps.filter(q=>q._aEnvoyer);let recus=0,refus=[];
+    for(let i=0;i<aEnv.length;i+=20){
+      const lot=aEnv.slice(i,i+20);
+      const r=await syncAppel({secret:conf.secret,action:'emarg-envoi',appareil:conf.appareil||'appareil',
+        fiches:lot.map(q=>({id:q.id,date:q.date,theme:q.theme,chantier:q.chantier,cond:q.cond,remontees:q.remontees||'',present:q.present||{},externes:q.externes||[],emarg:q.emarg||null}))},60000);
+      const ok={};(r.recus||[]).concat(r.deja||[]).forEach(id=>ok[id]=1);recus+=(r.recus||[]).length;
+      (r.refuses||[]).forEach(x=>{ok[x.id]=1;refus.push(x)});
+      lot.forEach(q=>{if(ok[q.id]){q._aEnvoyer=false;q._envoye=true}})}
+    purgerModeEmarg();save();
+    if(document.getElementById('app-emarg').style.display==='block'){renderEmargPick();renderSigs();
+      document.getElementById('dl-ch2').innerHTML=state.chantiers.map(c=>'<option value="'+esc(c.nom)+'">').join('');
+      document.getElementById('dl-cond2').innerHTML=[...new Set(conducteurs().map(c=>c.name))].map(n=>'<option value="'+esc(n)+'">').join('')}
+    const reste=state.qhps.filter(q=>q._aEnvoyer).length;
+    syncEtat(reste?'⚠️ '+reste+' fiche(s) en attente d’envoi':'✅ À jour à '+new Date().toLocaleTimeString('fr-FR').slice(0,5),reste?'err-txt':'ok-txt');
+    if(recus)toast('✅ '+recus+' fiche'+(recus>1?'s':'')+' envoyée'+(recus>1?'s':'')+' au suivi HSE');
+    if(refus.length)toast('⚠️ Fiche refusée par le serveur : '+refus[0].raison,true);
+    if(manuel&&!recus)toast('À jour ✓');
+    return true}
+  catch(e){syncEtat('⚠️ '+(e.message||'échec'),'err-txt');if(manuel)toast('Échec : '+(e.message||'?'),true);return false}
+  finally{syncEnCours=false;if(syncRelance){syncRelance=false;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncNow(false),1500)}}}
 async function syncNow(manuel){
+  if(modeEmarg())return syncEmarg(manuel);   // V3.4.7
   if(!syncConfigure()){if(manuel)toast('Renseigne d\'abord l\'adresse du webhook',true);return false}
   if(syncEnCours){if(manuel)toast('Synchro déjà en cours…');return false}
   syncEnCours=true;syncRelance=false;syncEtat('⏳ Synchronisation…','muted');
@@ -558,10 +618,13 @@ function b64url(txt){return btoa(unescape(encodeURIComponent(txt))).replace(/\+/
 function deb64url(t){let b=String(t).replace(/-/g,'+').replace(/_/g,'/');while(b.length%4)b+='=';return decodeURIComponent(escape(atob(b)))}
 function lienBranchement(avecEmarg){
   if(!conf.webhook)return '';
-  return location.origin+location.pathname+'#config='+b64url(JSON.stringify({u:conf.webhook,s:conf.secret||''}))+(avecEmarg?'&emargement':'')}
+  if(avecEmarg){   // V3.4.7 : jamais la clé complète dans un lien d'encadrant
+    if(!conf.cleEmarg||modeEmarg())return '';
+    return location.origin+location.pathname+'#config='+b64url(JSON.stringify({u:conf.webhook,s:conf.cleEmarg,e:1}))+'&emargement'}
+  return location.origin+location.pathname+'#config='+b64url(JSON.stringify({u:conf.webhook,s:conf.secret||''}))}
 function copierBranchement(avecEmarg){
   const l=lienBranchement(avecEmarg);
-  if(!l){toast('Configure d\'abord la synchronisation',true);return}
+  if(!l){toast(avecEmarg?'Lien d’encadrant indisponible : mets le script QHP en V2.8 (clé d’émargement), puis synchronise':'Configure d\'abord la synchronisation',true);return}
   const fini=()=>toast(avecEmarg?'Lien encadrant copié ✓ — envoie-le par SMS':'Lien de branchement copié ✓');
   if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(l).then(fini).catch(()=>prompt('Copie ce lien :',l));
   else prompt('Copie ce lien :',l)}
@@ -571,7 +634,16 @@ function appliquerLienBranchement(){
   try{
     const o=JSON.parse(deb64url(m[1]));
     if(!o.u)return false;
+    const avant=conf.mode;
+    if(o.e&&avant!=='emarg'&&conf.secret&&conf.secret!==o.s){
+      // V3.4.7 : appareil déjà branché (PC du service HSE, ou téléphone branché avec un ancien lien complet).
+      // On ne le bascule en « émargement seul » que si sa clé n'est plus valable (renouvelée) ; un poste HSE garde le suivi.
+      conf.webhook=o.u;conf.cleEmarg=o.s;try{localStorage.setItem(LS_CONF,JSON.stringify(conf))}catch(e){}
+      setTimeout(()=>verifierAvantEmarg(o.s),200);
+      return true}
     conf.webhook=o.u;conf.secret=o.s||'';conf.autoSync=true;
+    conf.mode=o.e?'emarg':'hse';   // V3.4.7 : lien d'émargement seul (clé limitée côté serveur)
+    if(conf.mode==='emarg'&&avant!=='emarg')preparerModeEmarg();
     if(!conf.appareil)conf.appareil=(/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)?'Téléphone':'PC')+' '+Math.random().toString(36).slice(2,6);
     try{localStorage.setItem(LS_CONF,JSON.stringify(conf))}catch(e){}
     const em=/[#&]emargement/.test(h);
@@ -983,17 +1055,19 @@ function goEmarg(){
   else location.hash='emargement';                            // ajoute une entrée d'historique -> hashchange -> openEmarg
 }
 function routeEmarg(){
-  const surRoute=/(^|[#&])emarg/i.test(location.hash||'');
+  const surRoute=modeEmarg()||/(^|[#&])emarg/i.test(location.hash||'');
   const affiche=document.getElementById('app-emarg').style.display==='block';
   if(surRoute){if(!affiche)openEmarg();}
   else{if(affiche)closeEmargUI();}
 }
 function closeEmargUI(){
+  if(modeEmarg()){openEmarg();return}   // V3.4.7 : pas de suivi derrière la fiche
   document.getElementById('app-emarg').style.display='none';
   document.body.style.paddingBottom='80px';
   document.querySelector('header').style.display='';document.querySelector('main').style.display='';document.querySelector('nav.tabs').style.display='';
   renderFiches();go('v-accueil')}
 function closeEmarg(){
+  if(modeEmarg()){openEmarg();return}   // V3.4.7 : en mode émargement seul, « quitter » = fiche vierge
   // Quitter la route : on nettoie le hash, le routeur ferme l'écran.
   if(/(^|[#&])emarg/i.test(location.hash||'')){
     const h=location.hash;history.back();
@@ -1065,7 +1139,8 @@ async function saveEmarg(){
   if(q.chantier){const ex=state.chantiers.find(c=>c.nom.toLowerCase()===q.chantier.toLowerCase());
     if(ex){if(q.cond)ex.cond=q.cond;ex.maj=nowISO()}else state.chantiers.push({id:uid(),nom:q.chantier,cond:q.cond||'',maj:nowISO()})}
   await pdfPut('sig_'+q.id,{sigs:emargSigs,noms});
-  save();renderFiches();syncAuto(q.id);
+  if(modeEmarg()){q._local=true;q._aEnvoyer=true;save();syncAuto()}   // V3.4.7 : part par « emarg-envoi », sans scan
+  else{save();renderFiches();syncAuto(q.id)}
   const payload={type:'qhp-fiche',v:1,fiche:q,sigs:emargSigs,noms};
   window.__lastEmarg={id:q.id,payload};
   document.getElementById('em-banner').innerHTML='';
@@ -1076,9 +1151,9 @@ async function saveEmarg(){
       : 'Si tu n\'es <b>pas</b> sur l\'appareil du service HSE, envoie-la avec le bouton « Envoyer au suivi » : le fichier s\'importe en un clic côté HSE (Réglages ▸ Importer une fiche signée).')+'</div>'+
     '<div class="row" style="margin-bottom:14px">'+
     '<button class="btn btn-ghost grow" onclick="printEmarg(\''+q.id+'\')">🖨 Imprimer / PDF</button>'+
-    '<button class="btn btn-accent grow" onclick="envoyerEmarg()">📤 Envoyer au suivi</button>'+
+    (modeEmarg()?'':'<button class="btn btn-accent grow" onclick="envoyerEmarg()">📤 Envoyer au suivi</button>')+
     '<button class="btn btn-primary grow" onclick="openEmarg()">＋ Nouvelle fiche</button>'+
-    '<button class="btn btn-ghost grow" onclick="closeEmarg()">↩ Retour au suivi</button></div>';
+    (modeEmarg()?'':'<button class="btn btn-ghost grow" onclick="closeEmarg()">↩ Retour au suivi</button>')+'</div>';
   toast('Fiche d\'émargement enregistrée ✓');window.scrollTo(0,document.body.scrollHeight)}
 async function envoyerEmarg(){const L=window.__lastEmarg;if(!L){toast('Rien à envoyer',true);return}
   const txt=JSON.stringify(L.payload);const nom='QHP-'+(L.payload.fiche.date||'')+'-'+(L.payload.fiche.chantier||'').replace(/[^\w\-]+/g,'_').slice(0,28)+'.qhp.json';
@@ -1450,11 +1525,12 @@ async function chargerListes(){
   return 'defaut'}
 async function demarrerQhp(){
 await chargerListes();
-setTimeout(repriseEnvois,4000);   // V3.3.1
+setTimeout(()=>{if(!modeEmarg())repriseEnvois()},4000);   // V3.3.1 (pas de scans en mode émargement)
   document.getElementById('logo').src=window.__LOGO__;
   document.getElementById('logo2').src=window.__LOGO__;
   load();renderFiches();
-  appliquerLienBranchement();renderAccueil();
+  appliquerLienBranchement();
+  if(modeEmarg()){document.body.classList.add('mode-emarg');purgerModeEmarg();save()}else renderAccueil();
   if(syncConfigure()){document.getElementById('sync-pill').style.display='';setTimeout(()=>syncNow(false),800);
     setInterval(()=>{if(!document.hidden&&conf.autoSync!==false)syncNow(false)},300000);
     window.addEventListener('online',()=>syncNow(false));}
@@ -1464,7 +1540,8 @@ setTimeout(repriseEnvois,4000);   // V3.3.1
     if(/[#&]config=/.test(location.hash||'')){
       if(appliquerLienBranchement()){
         document.getElementById('sync-pill').style.display='';
-        renderReglages();renderAccueil();setTimeout(()=>syncNow(false),400);
+        document.body.classList.toggle('mode-emarg',modeEmarg());
+        if(!modeEmarg()){renderReglages();renderAccueil()}setTimeout(()=>syncNow(false),400);
       }
     }
     routeEmarg();});
